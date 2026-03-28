@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from collections import deque
+import re
 from typing import Dict, List
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
 DEFAULT_BASE_URL = "https://www.xiaohongshu.com"
+DOMAIN_CLUSTERS = {
+    "beauty": ("美妆", "护肤", "彩妆", "化妆", "妆容", "试色", "口红", "成分"),
+    "fashion": ("穿搭", "时尚", "搭配", "OOTD"),
+    "lifestyle": ("探店", "旅行", "美食"),
+}
+DOMAIN_HINTS = tuple(hint for hints in DOMAIN_CLUSTERS.values() for hint in hints)
 
 
 def _extract_account_id_from_url(profile_url: str) -> str:
@@ -48,19 +55,27 @@ def extract_similar_profiles(
             if len(results) >= max_results:
                 return results
 
-    if results:
-        return results
+    return results
 
-    for anchor in soup.select(".comment-inner-container .author-wrapper a[href*='/user/profile/']"):
+
+def extract_search_result_profiles(
+    html: str,
+    max_results: int,
+    base_url: str = DEFAULT_BASE_URL,
+) -> List[Dict[str, str]]:
+    soup = BeautifulSoup(html, "html.parser")
+    seen = set()
+    results: List[Dict[str, str]] = []
+
+    for anchor in soup.select(".card-bottom-wrapper a.author[href*='/user/profile/']"):
         href = anchor.get("href", "").strip()
         if not href:
             continue
-        profile_url = urljoin(base_profile_url or DEFAULT_BASE_URL, href)
+        profile_url = urljoin(f"{base_url.rstrip('/')}/", href)
         account_id = _extract_account_id_from_url(profile_url)
-        if not account_id or account_id in seen or account_id == base_account_id:
-            continue
-        nickname = " ".join(anchor.stripped_strings)
-        if not nickname:
+        nickname = re.sub(r"\s+\d{2,4}[-/]\d{1,2}[-/]\d{1,2}$", "", " ".join(anchor.stripped_strings)).strip()
+        nickname = re.sub(r"\s+\d{1,2}-\d{1,2}$", "", nickname).strip()
+        if not account_id or account_id in seen or not nickname:
             continue
         seen.add(account_id)
         results.append(
@@ -72,7 +87,92 @@ def extract_similar_profiles(
         )
         if len(results) >= max_results:
             break
+
     return results
+
+
+def build_search_queries(seed_account: Dict[str, object]) -> List[str]:
+    visible_metadata = seed_account.get("visible_metadata", {}) or {}
+    tags = visible_metadata.get("tags", []) or []
+    if isinstance(tags, str):
+        tags = [tags]
+
+    domain_tag = next((tag for tag in tags if any(hint in tag for hint in DOMAIN_HINTS)), "")
+
+    queries = []
+    if domain_tag:
+        queries.append(domain_tag)
+    else:
+        for cluster_hints in DOMAIN_CLUSTERS.values():
+            for hint in cluster_hints:
+                if hint in str(seed_account.get("bio_text", "")):
+                    queries.append(f"{hint}博主" if "博主" not in hint else hint)
+                    break
+            if queries:
+                break
+
+    seen = set()
+    deduped = []
+    for query in queries:
+        query = re.sub(r"\s+", " ", query).strip()
+        if query and query not in seen:
+            seen.add(query)
+            deduped.append(query)
+    return deduped
+
+
+def parse_follower_count(value: str) -> float:
+    text = value.strip()
+    if not text:
+        return 0
+    multiplier = 1
+    if text.endswith("万"):
+        multiplier = 10000
+        text = text[:-1]
+    try:
+        return float(text) * multiplier
+    except ValueError:
+        return 0
+
+
+def is_relevant_creator_candidate(
+    seed_account: Dict[str, object],
+    candidate_account: Dict[str, object],
+    min_followers: int = 1000,
+) -> bool:
+    seed_meta = seed_account.get("visible_metadata", {}) or {}
+    candidate_meta = candidate_account.get("visible_metadata", {}) or {}
+
+    candidate_followers = parse_follower_count(str(candidate_meta.get("followers", "")))
+    if candidate_followers < min_followers:
+        return False
+
+    seed_text = " ".join(
+        [seed_account.get("bio_text", "")]
+        + list(seed_meta.get("tags", []) or [])
+        + [str(seed_meta.get("ip_location", ""))]
+    )
+    candidate_text = " ".join(
+        [candidate_account.get("bio_text", "")]
+        + list(candidate_meta.get("tags", []) or [])
+        + [str(candidate_meta.get("ip_location", ""))]
+    )
+
+    matched_cluster = None
+    for cluster_name, hints in DOMAIN_CLUSTERS.items():
+        if any(hint in seed_text for hint in hints):
+            matched_cluster = cluster_name
+            break
+
+    if matched_cluster is None:
+        return "博主" in candidate_text and candidate_followers >= min_followers
+
+    cluster_hints = DOMAIN_CLUSTERS[matched_cluster]
+    domain_match = any(hint in candidate_text for hint in cluster_hints)
+    if not domain_match:
+        return False
+
+    return candidate_followers >= min_followers
 
 
 def expand_recommendation_graph(

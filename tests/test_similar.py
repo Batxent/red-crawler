@@ -64,44 +64,64 @@ def test_extract_similar_profiles_ignores_non_recommendation_profile_links():
     assert profiles == []
 
 
-def test_extract_similar_profiles_falls_back_to_note_comment_authors():
+def test_extract_search_result_profiles_extracts_authors_from_search_cards():
     html = """
     <html>
       <body>
-        <div class="comment-inner-container">
-          <div class="author-wrapper">
-            <a class="name" href="/user/profile/user-001?xsec_source=pc_comment">LL</a>
+        <div class="note-item">
+          <div class="footer">
+            <div class="card-bottom-wrapper">
+              <a class="author" href="/user/profile/user-010?xsec_source=pc_search">美妆博主A</a>
+            </div>
           </div>
         </div>
-        <div class="comment-inner-container">
-          <div class="author-wrapper">
-            <a class="name" href="/user/profile/user-002?xsec_source=pc_comment">相似博主A</a>
-          </div>
-        </div>
-        <div class="comment-inner-container">
-          <div class="author-wrapper">
-            <a class="name" href="/user/profile/user-003?xsec_source=pc_comment">相似博主B</a>
+        <div class="note-item">
+          <div class="footer">
+            <div class="card-bottom-wrapper">
+              <a class="author" href="/user/profile/user-011?xsec_source=pc_search">美妆博主B</a>
+            </div>
           </div>
         </div>
       </body>
     </html>
     """
 
-    profiles = extract_similar_profiles(
+    from red_crawler.crawl.similar import extract_search_result_profiles
+
+    profiles = extract_search_result_profiles(
         html=html,
-        base_profile_url="https://www.xiaohongshu.com/user/profile/user-001",
         max_results=5,
     )
 
     assert profiles == [
         {
-            "account_id": "user-002",
-            "profile_url": "https://www.xiaohongshu.com/user/profile/user-002?xsec_source=pc_comment",
-            "nickname": "相似博主A",
+            "account_id": "user-010",
+            "profile_url": "https://www.xiaohongshu.com/user/profile/user-010?xsec_source=pc_search",
+            "nickname": "美妆博主A",
         },
         {
-            "account_id": "user-003",
-            "profile_url": "https://www.xiaohongshu.com/user/profile/user-003?xsec_source=pc_comment",
-            "nickname": "相似博主B",
+            "account_id": "user-011",
+            "profile_url": "https://www.xiaohongshu.com/user/profile/user-011?xsec_source=pc_search",
+            "nickname": "美妆博主B",
         },
     ]
+
+
+def test_is_relevant_creator_candidate_accepts_same_domain_synonyms():
+    from red_crawler.crawl.similar import build_search_queries, is_relevant_creator_candidate
+
+    seed_account = {
+        "bio_text": "北京美妆内容分享",
+        "visible_metadata": {"tags": ["北京朝阳", "美妆博主"], "ip_location": "北京"},
+    }
+    candidate_account = {
+        "bio_text": "成分党护肤干货分享",
+        "visible_metadata": {
+            "tags": ["时尚博主", "护肤博主"],
+            "followers": "5.2万",
+            "ip_location": "福建",
+        },
+    }
+
+    assert build_search_queries(seed_account) == ["美妆博主"]
+    assert is_relevant_creator_candidate(seed_account, candidate_account) is True

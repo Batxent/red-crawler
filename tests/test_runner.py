@@ -2,10 +2,11 @@ from red_crawler.runner import CrawlConfig, run_crawl_seed_with_client
 
 
 class FakeClient:
-    def __init__(self, pages, failures=None, note_pages=None):
+    def __init__(self, pages, failures=None, note_pages=None, search_pages=None):
         self.pages = pages
         self.failures = failures or set()
         self.note_pages = note_pages or {}
+        self.search_pages = search_pages or {}
 
     def fetch_profile_html(self, profile_url):
         if profile_url in self.failures:
@@ -14,6 +15,9 @@ class FakeClient:
 
     def fetch_note_recommendation_html(self, profile_url):
         return self.note_pages.get(profile_url, [])
+
+    def fetch_search_result_html(self, query):
+        return self.search_pages.get(query, "")
 
 
 def test_run_crawl_seed_collects_accounts_leads_and_failures():
@@ -103,47 +107,70 @@ def test_run_crawl_seed_marks_shell_error_page_as_failed():
     assert "profile page did not load" in result.accounts[0].crawl_error
 
 
-def test_run_crawl_seed_expands_candidates_from_note_comment_authors():
+def test_run_crawl_seed_expands_candidates_from_search_results():
     pages = {
         "https://www.xiaohongshu.com/user/profile/user-001": """
         <section class="profile">
           <div class="user-id">账号ID: user-001</div>
           <h1 class="user-name">Seed</h1>
           <div class="user-bio">商务合作 vx: seed_studio</div>
+          <div class="user-tags">
+            <span>北京</span>
+            <span>美妆博主</span>
+          </div>
+          <div class="user-followers">粉丝 35.1万</div>
         </section>
         """,
-        "https://www.xiaohongshu.com/user/profile/user-002?xsec_source=pc_comment": """
+        "https://www.xiaohongshu.com/user/profile/user-002?xsec_source=pc_search": """
         <section class="profile">
           <div class="user-id">账号ID: user-002</div>
           <h1 class="user-name">U2</h1>
-          <div class="user-bio">邮箱：u2@example.com</div>
+          <div class="user-bio">北京美妆博主 邮箱：u2@example.com</div>
+          <div class="user-tags">
+            <span>北京</span>
+            <span>美妆博主</span>
+          </div>
+          <div class="user-followers">粉丝 1296</div>
+        </section>
+        """,
+        "https://www.xiaohongshu.com/user/profile/user-003?xsec_source=pc_search": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-003</div>
+          <h1 class="user-name">U3</h1>
+          <div class="user-bio">摄影爱好者</div>
+          <div class="user-tags">
+            <span>摄影</span>
+          </div>
+          <div class="user-followers">粉丝 87</div>
         </section>
         """,
     }
-    note_pages = {
-        "https://www.xiaohongshu.com/user/profile/user-001": [
-            """
-            <div class="comment-inner-container">
-              <div class="author-wrapper">
-                <a class="name" href="/user/profile/user-001?xsec_source=pc_comment">Seed</a>
-              </div>
+    search_pages = {
+        "美妆博主": """
+        <div class="note-item">
+          <div class="footer">
+            <div class="card-bottom-wrapper">
+              <a class="author" href="/user/profile/user-002?xsec_source=pc_search">U2</a>
             </div>
-            <div class="comment-inner-container">
-              <div class="author-wrapper">
-                <a class="name" href="/user/profile/user-002?xsec_source=pc_comment">U2</a>
-              </div>
+          </div>
+        </div>
+        <div class="note-item">
+          <div class="footer">
+            <div class="card-bottom-wrapper">
+              <a class="author" href="/user/profile/user-003?xsec_source=pc_search">U3</a>
             </div>
-            """
-        ]
+          </div>
+        </div>
+        """
     }
-    client = FakeClient(pages=pages, note_pages=note_pages)
+    client = FakeClient(pages=pages, search_pages=search_pages)
     config = CrawlConfig(
         seed_url="https://www.xiaohongshu.com/user/profile/user-001",
         storage_state="state.json",
         output_dir="out",
         max_accounts=5,
         max_depth=1,
-        include_note_recommendations=True,
+        include_note_recommendations=False,
     )
 
     result = run_crawl_seed_with_client(config, client)

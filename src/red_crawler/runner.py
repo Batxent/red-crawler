@@ -5,7 +5,12 @@ from dataclasses import dataclass
 from typing import Any, Deque, Dict, Optional, Protocol, Tuple
 
 from red_crawler.crawl.profile import build_failed_account_record, parse_profile_html
-from red_crawler.crawl.similar import extract_similar_profiles
+from red_crawler.crawl.similar import (
+    build_search_queries,
+    extract_search_result_profiles,
+    extract_similar_profiles,
+    is_relevant_creator_candidate,
+)
 from red_crawler.extract.contacts import extract_contact_leads
 from red_crawler.models import AccountRecord, ContactLead, CrawlResult, RunReport
 from red_crawler.session import BrowserSession, PlaywrightCrawlerClient
@@ -15,6 +20,8 @@ class CrawlClient(Protocol):
     def fetch_profile_html(self, profile_url: str) -> str: ...
 
     def fetch_note_recommendation_html(self, profile_url: str) -> list[str]: ...
+
+    def fetch_search_result_html(self, query: str) -> str: ...
 
 
 @dataclass
@@ -97,6 +104,52 @@ def run_crawl_seed_with_client(
                         max_results=extra_slots,
                     )
                 )
+
+        if not recommendation_candidates and depth == 0:
+            search_candidates = []
+            seed_payload: Dict[str, object] = {
+                "bio_text": account.bio_text,
+                "visible_metadata": account.visible_metadata,
+            }
+            for query in build_search_queries(seed_payload):
+                search_html = client.fetch_search_result_html(query)
+                extra_slots = config.max_accounts - len(queued_urls)
+                if extra_slots <= 0:
+                    break
+                search_candidates.extend(
+                    extract_search_result_profiles(
+                        html=search_html,
+                        max_results=extra_slots,
+                    )
+                )
+                if search_candidates:
+                    break
+
+            filtered_search_candidates = []
+            for candidate in search_candidates:
+                candidate_url = candidate["profile_url"]
+                if candidate_url in queued_urls:
+                    continue
+                try:
+                    candidate_html = client.fetch_profile_html(candidate_url)
+                    candidate_account = parse_profile_html(
+                        html=candidate_html,
+                        profile_url=candidate_url,
+                        source_type="recommended",
+                        source_from=account.account_id,
+                    )
+                except Exception:
+                    continue
+                if is_relevant_creator_candidate(
+                    seed_account=seed_payload,
+                    candidate_account={
+                        "bio_text": candidate_account.bio_text,
+                        "visible_metadata": candidate_account.visible_metadata,
+                    },
+                ):
+                    filtered_search_candidates.append(candidate)
+
+            recommendation_candidates = filtered_search_candidates
 
         for candidate in recommendation_candidates:
             candidate_url = candidate["profile_url"]

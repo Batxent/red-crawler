@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import List
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 from playwright.sync_api import BrowserContext, Page, Playwright, sync_playwright
 
@@ -77,6 +77,10 @@ class PlaywrightCrawlerClient:
         profile_html = self.fetch_profile_html(profile_url)
         note_links = extract_note_detail_urls(profile_html, self.base_url, max_results=3)
         return [self._load_html(note_url) for note_url in note_links]
+
+    def fetch_search_result_html(self, query: str) -> str:
+        search_url = f"{self.base_url}/search_result?keyword={quote(query)}&source=web_explore_feed"
+        return self._load_html(search_url)
 
 
 def save_login_storage_state(
