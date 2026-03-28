@@ -8,6 +8,7 @@ from red_crawler.models import AccountRecord, ContactLead, CrawlResult, RunRepor
 def test_cli_crawl_seed_exports_expected_files(tmp_path, monkeypatch):
     def fake_run_crawl_seed(config):
         assert config.seed_url == "https://www.xiaohongshu.com/user/profile/user-001"
+        assert config.max_depth == 2
         return CrawlResult(
             accounts=[
                 AccountRecord(

@@ -14,6 +14,11 @@ DOMAIN_CLUSTERS = {
     "lifestyle": ("探店", "旅行", "美食"),
 }
 DOMAIN_HINTS = tuple(hint for hints in DOMAIN_CLUSTERS.values() for hint in hints)
+SEARCH_QUERY_GROUPS = {
+    "beauty": ("美妆博主", "护肤博主", "彩妆博主", "化妆博主"),
+    "fashion": ("穿搭博主", "时尚博主", "搭配博主", "OOTD"),
+    "lifestyle": ("探店博主", "旅行博主", "美食博主"),
+}
 STUDIO_HINTS = ("工作室", "机构", "官方", "品牌", "公司", "团队", "MCN")
 PRO_ARTIST_HINTS = ("化妆师", "彩妆师", "makeup artist", "Makeup Artist")
 CREATOR_HINTS = DOMAIN_HINTS + ("博主", "分享", "教程")
@@ -100,16 +105,20 @@ def build_search_queries(seed_account: Dict[str, object]) -> List[str]:
     if isinstance(tags, str):
         tags = [tags]
 
-    domain_tag = next((tag for tag in tags if any(hint in tag for hint in DOMAIN_HINTS)), "")
-
     queries = []
-    if domain_tag:
-        queries.append(domain_tag)
+    matched_cluster = _matched_cluster(
+        {
+            "bio_text": seed_account.get("bio_text", ""),
+            "visible_metadata": {"tags": tags},
+        }
+    )
+    if matched_cluster is not None:
+        queries.extend(SEARCH_QUERY_GROUPS[matched_cluster])
     else:
-        for cluster_hints in DOMAIN_CLUSTERS.values():
+        for cluster_name, cluster_hints in DOMAIN_CLUSTERS.items():
             for hint in cluster_hints:
                 if hint in str(seed_account.get("bio_text", "")):
-                    queries.append(f"{hint}博主" if "博主" not in hint else hint)
+                    queries.extend(SEARCH_QUERY_GROUPS[cluster_name])
                     break
             if queries:
                 break

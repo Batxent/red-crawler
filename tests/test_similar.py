@@ -128,7 +128,12 @@ def test_is_relevant_creator_candidate_accepts_same_domain_synonyms():
         },
     }
 
-    assert build_search_queries(seed_account) == ["美妆博主"]
+    assert build_search_queries(seed_account) == [
+        "美妆博主",
+        "护肤博主",
+        "彩妆博主",
+        "化妆博主",
+    ]
     assert classify_creator_segment(candidate_account) == "creator"
     assert is_relevant_creator_candidate(seed_account, candidate_account) is True
     assert score_creator_relevance(seed_account, candidate_account) >= 0.7

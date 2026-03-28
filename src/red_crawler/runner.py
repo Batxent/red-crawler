@@ -32,7 +32,7 @@ class CrawlConfig:
     storage_state: str
     output_dir: str
     max_accounts: int = 20
-    max_depth: int = 1
+    max_depth: int = 2
     include_note_recommendations: bool = False
 
 
@@ -115,7 +115,7 @@ def run_crawl_seed_with_client(
                     )
                 )
 
-        if not recommendation_candidates and depth == 0:
+        if not recommendation_candidates:
             search_candidates = []
             seed_payload: Dict[str, object] = {
                 "bio_text": account.bio_text,
@@ -132,8 +132,6 @@ def run_crawl_seed_with_client(
                         max_results=extra_slots,
                     )
                 )
-                if search_candidates:
-                    break
 
             filtered_search_candidates = []
             for candidate in search_candidates:

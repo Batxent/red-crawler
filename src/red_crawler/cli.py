@@ -17,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     crawl_seed.add_argument("--seed-url", required=True)
     crawl_seed.add_argument("--storage-state", required=True)
     crawl_seed.add_argument("--max-accounts", type=int, default=20)
-    crawl_seed.add_argument("--max-depth", type=int, default=1)
+    crawl_seed.add_argument("--max-depth", type=int, default=2)
     crawl_seed.add_argument("--include-note-recommendations", action="store_true")
     crawl_seed.add_argument("--output-dir", default="output")
 
