@@ -70,3 +70,33 @@ def test_run_crawl_seed_collects_accounts_leads_and_failures():
             "error": "profile page unavailable",
         }
     ]
+
+
+def test_run_crawl_seed_marks_shell_error_page_as_failed():
+    client = FakeClient(
+        pages={
+            "https://www.xiaohongshu.com/user/profile/LL16141319": """
+            <html>
+              <body>
+                <div>未连接到服务器，刷新一下试试</div>
+                <button>点击刷新</button>
+              </body>
+            </html>
+            """
+        }
+    )
+    config = CrawlConfig(
+        seed_url="https://www.xiaohongshu.com/user/profile/LL16141319",
+        storage_state="state.json",
+        output_dir="out",
+        max_accounts=5,
+        max_depth=1,
+        include_note_recommendations=False,
+    )
+
+    result = run_crawl_seed_with_client(config, client)
+
+    assert result.run_report.succeeded_accounts == 0
+    assert result.run_report.failed_accounts == 1
+    assert result.accounts[0].crawl_status == "failed"
+    assert "profile page did not load" in result.accounts[0].crawl_error

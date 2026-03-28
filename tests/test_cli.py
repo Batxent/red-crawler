@@ -95,3 +95,27 @@ def test_cli_login_saves_storage_state(tmp_path, monkeypatch):
         "output_path": tmp_path / "state.json",
         "login_url": "https://www.xiaohongshu.com",
     }
+
+
+def test_cli_open_uses_existing_storage_state(monkeypatch):
+    captured = {}
+
+    def fake_open_xiaohongshu(storage_state, open_url):
+        captured["storage_state"] = storage_state
+        captured["open_url"] = open_url
+
+    monkeypatch.setattr("red_crawler.cli.open_xiaohongshu", fake_open_xiaohongshu)
+
+    exit_code = main(
+        [
+            "open",
+            "--storage-state",
+            "./state.json",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured == {
+        "storage_state": "./state.json",
+        "open_url": "https://www.xiaohongshu.com",
+    }

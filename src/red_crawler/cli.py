@@ -6,7 +6,7 @@ from typing import Sequence
 
 from red_crawler.export.csv_writer import export_run
 from red_crawler.runner import CrawlConfig, run_crawl_seed
-from red_crawler.session import save_login_storage_state
+from red_crawler.session import open_xiaohongshu, save_login_storage_state
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,6 +24,10 @@ def build_parser() -> argparse.ArgumentParser:
     login = subparsers.add_parser("login")
     login.add_argument("--save-state", required=True)
     login.add_argument("--login-url", default="https://www.xiaohongshu.com")
+
+    open_page = subparsers.add_parser("open")
+    open_page.add_argument("--storage-state", required=True)
+    open_page.add_argument("--open-url", default="https://www.xiaohongshu.com")
     return parser
 
 
@@ -35,6 +39,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         save_login_storage_state(
             output_path=Path(args.save_state),
             login_url=args.login_url,
+        )
+        return 0
+
+    if args.command == "open":
+        open_xiaohongshu(
+            storage_state=args.storage_state,
+            open_url=args.open_url,
         )
         return 0
 

@@ -15,17 +15,18 @@ def extract_similar_profiles(
     max_results: int,
 ) -> List[Dict[str, str]]:
     soup = BeautifulSoup(html, "html.parser")
-    selectors = [
-        "section.recommend-users a[href*='/user/profile/']",
-        ".recommended-user[href*='/user/profile/']",
-        "a[href*='/user/profile/']",
-    ]
+    containers = soup.select(
+        "section.recommend-users, .recommend-users, .recommended-users, "
+        ".recommend-user-list, .user-recommend-list, [data-testid='recommend-users']"
+    )
+    if not containers:
+        return []
 
     seen = set()
     results: List[Dict[str, str]] = []
 
-    for selector in selectors:
-        for anchor in soup.select(selector):
+    for container in containers:
+        for anchor in container.select("a[href*='/user/profile/']"):
             href = anchor.get("href", "").strip()
             if not href:
                 continue

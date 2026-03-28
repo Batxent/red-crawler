@@ -52,11 +52,20 @@ class PlaywrightCrawlerClient:
     def _load_html(self, url: str) -> str:
         page = self.session.new_page()
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            if response is not None and response.status >= 400:
+                raise RuntimeError(f"page request failed with status {response.status}")
             try:
                 page.wait_for_load_state("networkidle", timeout=5000)
             except Exception:
                 pass
+            body_text = page.locator("body").inner_text()
+            if "未连接到服务器，刷新一下试试" in body_text:
+                page.reload(wait_until="domcontentloaded", timeout=30000)
+                try:
+                    page.wait_for_load_state("networkidle", timeout=5000)
+                except Exception:
+                    pass
             return page.content()
         finally:
             page.close()
@@ -94,5 +103,28 @@ def save_login_storage_state(
                 tty.readline()
             context.storage_state(path=str(state_path))
             print(f"\nsaved to {state_path}")
+        finally:
+            browser.close()
+
+
+def open_xiaohongshu(
+    storage_state: str | Path,
+    open_url: str = "https://www.xiaohongshu.com",
+) -> None:
+    storage_state_path = Path(storage_state)
+    if not storage_state_path.exists():
+        raise FileNotFoundError(
+            f"storage state file not found: {storage_state_path.as_posix()}"
+        )
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=False)
+        context = browser.new_context(storage_state=str(storage_state_path))
+        page = context.new_page()
+        try:
+            page.goto(open_url, wait_until="domcontentloaded", timeout=30000)
+            print("浏览器已打开，回到终端按回车关闭会话...", end="", flush=True)
+            with open("/dev/tty", "r", encoding="utf-8") as tty:
+                tty.readline()
         finally:
             browser.close()

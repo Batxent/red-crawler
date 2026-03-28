@@ -42,3 +42,23 @@ def test_expand_recommendation_graph_obeys_depth_and_account_limit():
     )
 
     assert expanded == ["seed", "u2", "u3"]
+
+
+def test_extract_similar_profiles_ignores_non_recommendation_profile_links():
+    html = """
+    <html>
+      <body>
+        <nav>
+          <a href="/user/profile/616b9a13000000000201b634">tomi</a>
+        </nav>
+      </body>
+    </html>
+    """
+
+    profiles = extract_similar_profiles(
+        html=html,
+        base_profile_url="https://www.xiaohongshu.com/user/profile/LL16141319",
+        max_results=5,
+    )
+
+    assert profiles == []
