@@ -6,10 +6,18 @@ from typing import Iterable, List
 from red_crawler.models import ContactLead
 
 EMAIL_RE = re.compile(r"([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})")
+OBFUSCATED_QQ_EMAIL_RE = re.compile(
+    r"(?<![A-Za-z0-9._%+-])([1-9]\d{4,11})\s*@\s*(?:qq|QQ|q|Q|企鹅|🐧)\s*(?:\.|点)\s*com\b"
+)
+QQ_MAIL_LABEL_RE = re.compile(
+    r"(?:q邮箱|Q邮箱|qq邮箱|QQ邮箱|企鹅邮箱|🐧邮箱)\s*[:：]?\s*([1-9]\d{4,11})"
+)
 PHONE_RE = re.compile(r"(?<!\d)(1[3-9]\d{9})(?!\d)")
 WECHAT_RE = re.compile(
-    r"(?:微信|vx|wx|vx|VX|WX|v信|微(?:信|x))\s*[:：]?\s*([A-Za-z][A-Za-z0-9_-]{5,19})"
+    r"(?:(?:微信|vx|wx|VX|WX|v信|微(?:信|x)|薇|薇信|卫星)\s*[:：]?\s*|(?<![A-Za-z0-9_])[vV]\s*[:：]\s*)"
+    r"([A-Za-z][A-Za-z0-9_-]{5,19})"
 )
+QQ_RE = re.compile(r"(?:QQ|qq|扣扣)\s*[:：]?\s*([1-9]\d{4,11})")
 BUSINESS_NOTE_RE = re.compile(r"([^，。；;\n]*(?:备注|品牌名)[^，。；;\n]*)")
 MANAGER_RE = re.compile(r"([^，。；;\n]*(?:经纪人|商务对接|商务联系)[^，。；;\n]*)")
 
@@ -49,6 +57,36 @@ def extract_contact_leads(account_id: str, bio_text: str) -> List[ContactLead]:
             )
         )
 
+    for match in OBFUSCATED_QQ_EMAIL_RE.finditer(text):
+        email = f"{match.group(1)}@qq.com"
+        leads.append(
+            ContactLead(
+                account_id=account_id,
+                lead_type="email",
+                normalized_value=email,
+                raw_snippet=match.group(0).strip(" ，。;；"),
+                confidence=0.92,
+                extractor_name="obfuscated_qq_email_regex",
+                source_field="bio",
+                dedupe_key=f"email:{email}",
+            )
+        )
+
+    for match in QQ_MAIL_LABEL_RE.finditer(text):
+        email = f"{match.group(1)}@qq.com"
+        leads.append(
+            ContactLead(
+                account_id=account_id,
+                lead_type="email",
+                normalized_value=email,
+                raw_snippet=match.group(0).strip(" ，。;；"),
+                confidence=0.9,
+                extractor_name="qq_mail_label_regex",
+                source_field="bio",
+                dedupe_key=f"email:{email}",
+            )
+        )
+
     for match in PHONE_RE.finditer(text):
         phone = match.group(1)
         leads.append(
@@ -76,6 +114,21 @@ def extract_contact_leads(account_id: str, bio_text: str) -> List[ContactLead]:
                 extractor_name="wechat_regex",
                 source_field="bio",
                 dedupe_key=f"wechat:{value}",
+            )
+        )
+
+    for match in QQ_RE.finditer(text):
+        value = match.group(1)
+        leads.append(
+            ContactLead(
+                account_id=account_id,
+                lead_type="qq",
+                normalized_value=value,
+                raw_snippet=match.group(0).strip(" ，。;；"),
+                confidence=0.78,
+                extractor_name="qq_regex",
+                source_field="bio",
+                dedupe_key=f"qq:{value}",
             )
         )
 

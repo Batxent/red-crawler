@@ -29,3 +29,34 @@ def test_extract_contact_leads_marks_unstructured_business_hint():
     assert leads[0].lead_type == "other_hint"
     assert leads[0].normalized_value == "可接商务合作"
     assert 0.3 <= leads[0].confidence < 0.6
+
+
+def test_extract_contact_leads_recovers_obfuscated_qq_email():
+    bio = "商务合作请发q邮箱：919581887，也可以发 919581887@🐧.com"
+
+    leads = extract_contact_leads(account_id="user-003", bio_text=bio)
+    emails = [lead for lead in leads if lead.lead_type == "email"]
+
+    assert len(emails) == 1
+    assert emails[0].normalized_value == "919581887@qq.com"
+    assert emails[0].dedupe_key == "email:919581887@qq.com"
+
+
+def test_extract_contact_leads_supports_wechat_aliases_and_qq_number():
+    bio = "商务V: Lucky_mia88，薇：Lucky_mia88，扣扣：919581887"
+
+    leads = extract_contact_leads(account_id="user-004", bio_text=bio)
+    by_type = {lead.lead_type: lead for lead in leads}
+
+    assert by_type["wechat"].normalized_value == "lucky_mia88"
+    assert by_type["qq"].normalized_value == "919581887"
+    assert by_type["qq"].confidence >= 0.7
+
+
+def test_extract_contact_leads_supports_single_letter_v_alias():
+    bio = "合作请加V: Lucky_mia88"
+
+    leads = extract_contact_leads(account_id="user-005", bio_text=bio)
+    by_type = {lead.lead_type: lead for lead in leads}
+
+    assert by_type["wechat"].normalized_value == "lucky_mia88"
