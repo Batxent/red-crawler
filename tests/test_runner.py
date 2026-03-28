@@ -66,6 +66,8 @@ def test_run_crawl_seed_collects_accounts_leads_and_failures():
         "user-003",
     ]
     assert result.accounts[2].crawl_status == "failed"
+    assert result.accounts[0].creator_segment == "general"
+    assert result.accounts[0].relevance_score == 1.0
     assert result.run_report.succeeded_accounts == 2
     assert result.run_report.failed_accounts == 1
     assert result.run_report.lead_counts == {"email": 1, "wechat": 1}
@@ -176,5 +178,7 @@ def test_run_crawl_seed_expands_candidates_from_search_results():
     result = run_crawl_seed_with_client(config, client)
 
     assert [account.account_id for account in result.accounts] == ["user-001", "user-002"]
+    assert result.accounts[1].creator_segment == "creator"
+    assert result.accounts[1].relevance_score >= 0.7
     assert result.run_report.succeeded_accounts == 2
     assert result.run_report.lead_counts == {"email": 1, "wechat": 1}

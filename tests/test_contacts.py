@@ -88,6 +88,15 @@ def test_extract_contact_leads_keeps_redirected_account_hints():
     ])
 
 
+def test_extract_contact_leads_extracts_redirect_hint_without_leading_bio_noise():
+    bio = "来了就是姐妹👭 痘龄12年 日常在@蕾大哥爱火锅 2635381804@qq.com"
+
+    leads = extract_contact_leads(account_id="user-010", bio_text=bio)
+    hints = [lead.normalized_value for lead in leads if lead.lead_type == "other_hint"]
+
+    assert hints == ["日常在@蕾大哥爱火锅"]
+
+
 def test_extract_contact_leads_supports_more_wechat_alias_variants():
     bio = "合作请加卫星号：Lucky_mia88，或者 wx：Lucky_mia88，w x: Lucky_mia88"
 

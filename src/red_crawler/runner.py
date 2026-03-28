@@ -7,9 +7,11 @@ from typing import Any, Deque, Dict, Optional, Protocol, Tuple
 from red_crawler.crawl.profile import build_failed_account_record, parse_profile_html
 from red_crawler.crawl.similar import (
     build_search_queries,
+    classify_creator_segment,
     extract_search_result_profiles,
     extract_similar_profiles,
     is_relevant_creator_candidate,
+    score_creator_relevance,
 )
 from red_crawler.extract.contacts import extract_contact_leads
 from red_crawler.models import AccountRecord, ContactLead, CrawlResult, RunReport
@@ -61,6 +63,14 @@ def run_crawl_seed_with_client(
                 source_type=source_type,
                 source_from=source_from,
             )
+            account.creator_segment = classify_creator_segment(
+                {
+                    "nickname": account.nickname,
+                    "bio_text": account.bio_text,
+                    "visible_metadata": account.visible_metadata,
+                }
+            )
+            account.relevance_score = 1.0 if source_type == "seed" else 0.0
             accounts.append(account)
             contact_leads.extend(
                 extract_contact_leads(
@@ -140,12 +150,14 @@ def run_crawl_seed_with_client(
                     )
                 except Exception:
                     continue
+                candidate_payload = {
+                    "nickname": candidate_account.nickname,
+                    "bio_text": candidate_account.bio_text,
+                    "visible_metadata": candidate_account.visible_metadata,
+                }
                 if is_relevant_creator_candidate(
                     seed_account=seed_payload,
-                    candidate_account={
-                        "bio_text": candidate_account.bio_text,
-                        "visible_metadata": candidate_account.visible_metadata,
-                    },
+                    candidate_account=candidate_payload,
                 ):
                     filtered_search_candidates.append(candidate)
 
@@ -169,6 +181,27 @@ def run_crawl_seed_with_client(
 
     lead_counts = dict(sorted(Counter(lead.lead_type for lead in contact_leads).items()))
     failed_accounts = sum(1 for account in accounts if account.crawl_status != "success")
+
+    if accounts:
+        seed_payload = {
+            "nickname": accounts[0].nickname,
+            "bio_text": accounts[0].bio_text,
+            "visible_metadata": accounts[0].visible_metadata,
+        }
+        for account in accounts:
+            if account.crawl_status != "success":
+                continue
+            account_payload = {
+                "nickname": account.nickname,
+                "bio_text": account.bio_text,
+                "visible_metadata": account.visible_metadata,
+            }
+            account.creator_segment = classify_creator_segment(account_payload)
+            if account.source_type != "seed":
+                account.relevance_score = score_creator_relevance(
+                    seed_account=seed_payload,
+                    candidate_account=account_payload,
+                )
 
     return CrawlResult(
         accounts=accounts,

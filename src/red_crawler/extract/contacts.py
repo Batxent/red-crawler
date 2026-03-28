@@ -23,7 +23,7 @@ WECHAT_RE = re.compile(
 QQ_RE = re.compile(r"(?:QQ|qq|扣扣)\s*[:：]?\s*([1-9]\d{4,11})")
 BUSINESS_NOTE_RE = re.compile(r"([^，。；;\n]*(?:备注|品牌名)[^，。；;\n]*)")
 MANAGER_RE = re.compile(r"([^，。；;\n]*(?:经纪人|商务对接|商务联系)[^，。；;\n]*)")
-REDIRECT_ACCOUNT_RE = re.compile(r"([^，。；;\n]*(?:日常在|小号在|大号在|备用号在)\s*@[\w\u4e00-\u9fff._-]+)")
+REDIRECT_ACCOUNT_RE = re.compile(r"((?:日常在|小号在|大号在|备用号在)\s*@[\w\u4e00-\u9fff._-]+)")
 SOFT_WECHAT_HINT_RE = re.compile(
     r"([^，。；;\n]*(?:加[Vv]|加微|加薇)[^，。；;\n]*(?:置顶|自取)[^，。；;\n]*|"
     r"[^，。；;\n]*微[^，。；;\n]{0,4}[:：]\s*置顶自取[^，。；;\n]*)"

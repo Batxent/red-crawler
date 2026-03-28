@@ -14,6 +14,9 @@ DOMAIN_CLUSTERS = {
     "lifestyle": ("探店", "旅行", "美食"),
 }
 DOMAIN_HINTS = tuple(hint for hints in DOMAIN_CLUSTERS.values() for hint in hints)
+STUDIO_HINTS = ("工作室", "机构", "官方", "品牌", "公司", "团队", "MCN")
+PRO_ARTIST_HINTS = ("化妆师", "彩妆师", "makeup artist", "Makeup Artist")
+CREATOR_HINTS = DOMAIN_HINTS + ("博主", "分享", "教程")
 
 
 def _extract_account_id_from_url(profile_url: str) -> str:
@@ -135,44 +138,83 @@ def parse_follower_count(value: str) -> float:
         return 0
 
 
+def _account_text(account: Dict[str, object]) -> str:
+    meta = account.get("visible_metadata", {}) or {}
+    return " ".join(
+        [str(account.get("nickname", "")), str(account.get("bio_text", ""))]
+        + list(meta.get("tags", []) or [])
+    )
+
+
+def _matched_cluster(seed_account: Dict[str, object]) -> str | None:
+    seed_text = _account_text(seed_account)
+    for cluster_name, hints in DOMAIN_CLUSTERS.items():
+        if any(hint in seed_text for hint in hints):
+            return cluster_name
+    return None
+
+
+def classify_creator_segment(account: Dict[str, object]) -> str:
+    text = _account_text(account)
+    lowered = text.lower()
+    if any(hint.lower() in lowered for hint in STUDIO_HINTS):
+        return "studio"
+    if any(hint.lower() in lowered for hint in PRO_ARTIST_HINTS):
+        return "professional_artist"
+    if any(hint.lower() in lowered for hint in CREATOR_HINTS):
+        return "creator"
+    return "general"
+
+
+def score_creator_relevance(
+    seed_account: Dict[str, object],
+    candidate_account: Dict[str, object],
+) -> float:
+    candidate_meta = candidate_account.get("visible_metadata", {}) or {}
+    candidate_followers = parse_follower_count(str(candidate_meta.get("followers", "")))
+    candidate_text = _account_text(candidate_account)
+    segment = classify_creator_segment(candidate_account)
+    score = 0.0
+
+    matched_cluster = _matched_cluster(seed_account)
+    if matched_cluster is None:
+        score += 0.25 if "博主" in candidate_text else 0.0
+    else:
+        cluster_hints = DOMAIN_CLUSTERS[matched_cluster]
+        if any(hint in candidate_text for hint in cluster_hints):
+            score += 0.55
+        else:
+            return 0.0
+
+    if candidate_followers >= 500_000:
+        score += 0.28
+    elif candidate_followers >= 100_000:
+        score += 0.22
+    elif candidate_followers >= 10_000:
+        score += 0.15
+    elif candidate_followers >= 1_000:
+        score += 0.08
+
+    if segment == "creator":
+        score += 0.17
+    elif segment == "professional_artist":
+        score += 0.08
+    elif segment == "studio":
+        score -= 0.12
+
+    return round(max(0.0, min(score, 1.0)), 2)
+
+
 def is_relevant_creator_candidate(
     seed_account: Dict[str, object],
     candidate_account: Dict[str, object],
     min_followers: int = 1000,
 ) -> bool:
-    seed_meta = seed_account.get("visible_metadata", {}) or {}
     candidate_meta = candidate_account.get("visible_metadata", {}) or {}
-
     candidate_followers = parse_follower_count(str(candidate_meta.get("followers", "")))
     if candidate_followers < min_followers:
         return False
-
-    seed_text = " ".join(
-        [seed_account.get("bio_text", "")]
-        + list(seed_meta.get("tags", []) or [])
-        + [str(seed_meta.get("ip_location", ""))]
-    )
-    candidate_text = " ".join(
-        [candidate_account.get("bio_text", "")]
-        + list(candidate_meta.get("tags", []) or [])
-        + [str(candidate_meta.get("ip_location", ""))]
-    )
-
-    matched_cluster = None
-    for cluster_name, hints in DOMAIN_CLUSTERS.items():
-        if any(hint in seed_text for hint in hints):
-            matched_cluster = cluster_name
-            break
-
-    if matched_cluster is None:
-        return "博主" in candidate_text and candidate_followers >= min_followers
-
-    cluster_hints = DOMAIN_CLUSTERS[matched_cluster]
-    domain_match = any(hint in candidate_text for hint in cluster_hints)
-    if not domain_match:
-        return False
-
-    return candidate_followers >= min_followers
+    return score_creator_relevance(seed_account, candidate_account) >= 0.7
 
 
 def expand_recommendation_graph(

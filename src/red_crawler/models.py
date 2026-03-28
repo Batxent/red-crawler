@@ -15,6 +15,8 @@ class AccountRecord:
     source_from: Optional[str]
     crawl_status: str
     crawl_error: Optional[str]
+    creator_segment: str = ""
+    relevance_score: float = 0.0
 
     def to_row(self) -> Dict[str, str]:
         import json
@@ -27,6 +29,8 @@ class AccountRecord:
             "visible_metadata": json.dumps(
                 self.visible_metadata, ensure_ascii=False, sort_keys=True
             ),
+            "creator_segment": self.creator_segment,
+            "relevance_score": f"{self.relevance_score:.2f}",
             "source_type": self.source_type,
             "source_from": self.source_from or "",
             "crawl_status": self.crawl_status,

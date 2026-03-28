@@ -20,6 +20,8 @@ def export_run(result: CrawlResult, output_dir: str | Path) -> None:
                 "nickname",
                 "bio_text",
                 "visible_metadata",
+                "creator_segment",
+                "relevance_score",
                 "source_type",
                 "source_from",
                 "crawl_status",

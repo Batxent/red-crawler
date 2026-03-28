@@ -108,7 +108,12 @@ def test_extract_search_result_profiles_extracts_authors_from_search_cards():
 
 
 def test_is_relevant_creator_candidate_accepts_same_domain_synonyms():
-    from red_crawler.crawl.similar import build_search_queries, is_relevant_creator_candidate
+    from red_crawler.crawl.similar import (
+        build_search_queries,
+        classify_creator_segment,
+        is_relevant_creator_candidate,
+        score_creator_relevance,
+    )
 
     seed_account = {
         "bio_text": "北京美妆内容分享",
@@ -124,4 +129,30 @@ def test_is_relevant_creator_candidate_accepts_same_domain_synonyms():
     }
 
     assert build_search_queries(seed_account) == ["美妆博主"]
+    assert classify_creator_segment(candidate_account) == "creator"
     assert is_relevant_creator_candidate(seed_account, candidate_account) is True
+    assert score_creator_relevance(seed_account, candidate_account) >= 0.7
+
+
+def test_score_creator_relevance_penalizes_studio_accounts():
+    from red_crawler.crawl.similar import (
+        classify_creator_segment,
+        is_relevant_creator_candidate,
+        score_creator_relevance,
+    )
+
+    seed_account = {
+        "bio_text": "护肤美妆分享",
+        "visible_metadata": {"tags": ["美妆博主"]},
+    }
+    studio_account = {
+        "bio_text": "某某工作室官方账号，承接品牌拍摄与培训",
+        "visible_metadata": {
+            "tags": ["工作室", "化妆师"],
+            "followers": "12.8万",
+        },
+    }
+
+    assert classify_creator_segment(studio_account) == "studio"
+    assert score_creator_relevance(seed_account, studio_account) < 0.7
+    assert is_relevant_creator_candidate(seed_account, studio_account) is False
