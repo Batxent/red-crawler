@@ -19,6 +19,13 @@ SEARCH_QUERY_GROUPS = {
     "fashion": ("穿搭博主", "时尚博主", "搭配博主", "OOTD"),
     "lifestyle": ("探店博主", "旅行博主", "美食博主"),
 }
+TOPIC_QUERY_HINTS = (
+    ("抗痘", "抗痘博主"),
+    ("长痘", "抗痘博主"),
+    ("痘肌", "痘肌护肤"),
+    ("敏感肌", "敏感肌护肤"),
+    ("油痘肌", "油痘肌护肤"),
+)
 STUDIO_HINTS = ("工作室", "机构", "官方", "品牌", "公司", "团队", "MCN")
 PRO_ARTIST_HINTS = ("化妆师", "彩妆师", "makeup artist", "Makeup Artist")
 CREATOR_HINTS = DOMAIN_HINTS + ("博主", "分享", "教程")
@@ -122,6 +129,11 @@ def build_search_queries(seed_account: Dict[str, object]) -> List[str]:
                     break
             if queries:
                 break
+
+    seed_text = _account_text(seed_account)
+    for hint, query in TOPIC_QUERY_HINTS:
+        if hint in seed_text:
+            queries.append(query)
 
     seen = set()
     deduped = []

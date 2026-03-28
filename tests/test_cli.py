@@ -9,6 +9,7 @@ def test_cli_crawl_seed_exports_expected_files(tmp_path, monkeypatch):
     def fake_run_crawl_seed(config):
         assert config.seed_url == "https://www.xiaohongshu.com/user/profile/user-001"
         assert config.max_depth == 2
+        assert config.safe_mode is True
         return CrawlResult(
             accounts=[
                 AccountRecord(
@@ -54,6 +55,7 @@ def test_cli_crawl_seed_exports_expected_files(tmp_path, monkeypatch):
             "https://www.xiaohongshu.com/user/profile/user-001",
             "--storage-state",
             "state.json",
+            "--safe-mode",
             "--output-dir",
             str(tmp_path),
         ]

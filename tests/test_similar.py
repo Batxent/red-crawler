@@ -139,6 +139,24 @@ def test_is_relevant_creator_candidate_accepts_same_domain_synonyms():
     assert score_creator_relevance(seed_account, candidate_account) >= 0.7
 
 
+def test_build_search_queries_adds_seed_specific_topic_terms():
+    from red_crawler.crawl.similar import build_search_queries
+
+    seed_account = {
+        "bio_text": "痘龄12年 一直在长痘抗痘路上 痘肌护肤分享",
+        "visible_metadata": {"tags": ["美妆博主"]},
+    }
+
+    assert build_search_queries(seed_account) == [
+        "美妆博主",
+        "护肤博主",
+        "彩妆博主",
+        "化妆博主",
+        "抗痘博主",
+        "痘肌护肤",
+    ]
+
+
 def test_score_creator_relevance_penalizes_studio_accounts():
     from red_crawler.crawl.similar import (
         classify_creator_segment,

@@ -1,4 +1,5 @@
 from red_crawler.runner import CrawlConfig, run_crawl_seed_with_client
+from red_crawler.session import RiskControlTriggered
 
 
 class FakeClient:
@@ -17,9 +18,12 @@ class FakeClient:
     def fetch_note_recommendation_html(self, profile_url):
         return self.note_pages.get(profile_url, [])
 
-    def fetch_search_result_html(self, query):
+    def fetch_search_result_htmls(self, query):
         self.search_queries.append(query)
-        return self.search_pages.get(query, "")
+        payload = self.search_pages.get(query, [])
+        if isinstance(payload, str):
+            return [payload]
+        return payload
 
 
 def test_run_crawl_seed_collects_accounts_leads_and_failures():
@@ -150,22 +154,24 @@ def test_run_crawl_seed_expands_candidates_from_search_results():
         """,
     }
     search_pages = {
-        "美妆博主": """
-        <div class="note-item">
-          <div class="footer">
-            <div class="card-bottom-wrapper">
-              <a class="author" href="/user/profile/user-002?xsec_source=pc_search">U2</a>
+        "美妆博主": [
+            """
+            <div class="note-item">
+              <div class="footer">
+                <div class="card-bottom-wrapper">
+                  <a class="author" href="/user/profile/user-002?xsec_source=pc_search">U2</a>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-        <div class="note-item">
-          <div class="footer">
-            <div class="card-bottom-wrapper">
-              <a class="author" href="/user/profile/user-003?xsec_source=pc_search">U3</a>
+            <div class="note-item">
+              <div class="footer">
+                <div class="card-bottom-wrapper">
+                  <a class="author" href="/user/profile/user-003?xsec_source=pc_search">U3</a>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-        """
+            """
+        ]
     }
     client = FakeClient(pages=pages, search_pages=search_pages)
     config = CrawlConfig(
@@ -192,7 +198,7 @@ def test_run_crawl_seed_uses_multiple_search_queries_to_fill_more_candidates():
         <section class="profile">
           <div class="user-id">账号ID: user-001</div>
           <h1 class="user-name">Seed</h1>
-          <div class="user-bio">美妆护肤内容分享</div>
+          <div class="user-bio">美妆护肤内容分享 抗痘经验 痘肌护理</div>
           <div class="user-tags">
             <span>美妆博主</span>
           </div>
@@ -219,26 +225,42 @@ def test_run_crawl_seed_uses_multiple_search_queries_to_fill_more_candidates():
         """,
     }
     search_pages = {
-        "美妆博主": """
-        <div class="note-item">
-          <div class="footer">
-            <div class="card-bottom-wrapper">
-              <a class="author" href="/user/profile/user-002?xsec_source=pc_search">U2</a>
+        "美妆博主": [
+            """
+            <div class="note-item">
+              <div class="footer">
+                <div class="card-bottom-wrapper">
+                  <a class="author" href="/user/profile/user-002?xsec_source=pc_search">U2</a>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-        """,
-        "护肤博主": "",
-        "彩妆博主": """
-        <div class="note-item">
-          <div class="footer">
-            <div class="card-bottom-wrapper">
-              <a class="author" href="/user/profile/user-003?xsec_source=pc_search">U3</a>
+            """
+        ],
+        "护肤博主": [""],
+        "彩妆博主": [
+            """
+            <div class="note-item">
+              <div class="footer">
+                <div class="card-bottom-wrapper">
+                  <a class="author" href="/user/profile/user-003?xsec_source=pc_search">U3</a>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-        """,
-        "化妆博主": "",
+            """
+        ],
+        "化妆博主": [""],
+        "抗痘博主": [
+            """
+            <div class="note-item">
+              <div class="footer">
+                <div class="card-bottom-wrapper">
+                  <a class="author" href="/user/profile/user-003?xsec_source=pc_search">U3</a>
+                </div>
+              </div>
+            </div>
+            """
+        ],
+        "痘肌护肤": [""],
     }
     client = FakeClient(pages=pages, search_pages=search_pages)
     config = CrawlConfig(
@@ -257,7 +279,14 @@ def test_run_crawl_seed_uses_multiple_search_queries_to_fill_more_candidates():
         "user-002",
         "user-003",
     ]
-    assert client.search_queries == ["美妆博主", "护肤博主", "彩妆博主", "化妆博主"]
+    assert client.search_queries == [
+        "美妆博主",
+        "护肤博主",
+        "彩妆博主",
+        "化妆博主",
+        "抗痘博主",
+        "痘肌护肤",
+    ]
 
 
 def test_run_crawl_seed_allows_second_layer_search_expansion():
@@ -291,29 +320,33 @@ def test_run_crawl_seed_allows_second_layer_search_expansion():
         """,
     }
     search_pages = {
-        "美妆博主": """
+        "美妆博主": [
+            """
+            <div class="note-item">
+              <div class="footer">
+                <div class="card-bottom-wrapper">
+                  <a class="author" href="/user/profile/user-002?xsec_source=pc_search">U2</a>
+                </div>
+              </div>
+            </div>
+            """
+        ],
+        "护肤博主": [""],
+        "彩妆博主": [""],
+        "化妆博主": [""],
+    }
+    client = FakeClient(pages=pages, search_pages=search_pages)
+    client.search_pages["护肤博主"] = [
+        """
         <div class="note-item">
           <div class="footer">
             <div class="card-bottom-wrapper">
-              <a class="author" href="/user/profile/user-002?xsec_source=pc_search">U2</a>
+              <a class="author" href="/user/profile/user-004?xsec_source=pc_search">U4</a>
             </div>
           </div>
         </div>
-        """,
-        "护肤博主": "",
-        "彩妆博主": "",
-        "化妆博主": "",
-    }
-    client = FakeClient(pages=pages, search_pages=search_pages)
-    client.search_pages["护肤博主"] = """
-    <div class="note-item">
-      <div class="footer">
-        <div class="card-bottom-wrapper">
-          <a class="author" href="/user/profile/user-004?xsec_source=pc_search">U4</a>
-        </div>
-      </div>
-    </div>
-    """
+        """
+    ]
     config = CrawlConfig(
         seed_url="https://www.xiaohongshu.com/user/profile/user-001",
         storage_state="state.json",
@@ -331,3 +364,112 @@ def test_run_crawl_seed_allows_second_layer_search_expansion():
         "user-004",
     ]
     assert client.search_queries.count("护肤博主") >= 2
+
+
+def test_run_crawl_seed_uses_multiple_search_pages_per_query():
+    pages = {
+        "https://www.xiaohongshu.com/user/profile/user-001": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-001</div>
+          <h1 class="user-name">Seed</h1>
+          <div class="user-bio">美妆内容分享</div>
+          <div class="user-tags"><span>美妆博主</span></div>
+          <div class="user-followers">粉丝 35.1万</div>
+        </section>
+        """,
+        "https://www.xiaohongshu.com/user/profile/user-002?xsec_source=pc_search": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-002</div>
+          <h1 class="user-name">U2</h1>
+          <div class="user-bio">美妆博主</div>
+          <div class="user-tags"><span>美妆博主</span></div>
+          <div class="user-followers">粉丝 2.1万</div>
+        </section>
+        """,
+        "https://www.xiaohongshu.com/user/profile/user-003?xsec_source=pc_search": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-003</div>
+          <h1 class="user-name">U3</h1>
+          <div class="user-bio">彩妆博主</div>
+          <div class="user-tags"><span>彩妆博主</span></div>
+          <div class="user-followers">粉丝 3.6万</div>
+        </section>
+        """,
+    }
+    search_pages = {
+        "美妆博主": [
+            """
+            <div class="note-item">
+              <div class="footer">
+                <div class="card-bottom-wrapper">
+                  <a class="author" href="/user/profile/user-002?xsec_source=pc_search">U2</a>
+                </div>
+              </div>
+            </div>
+            """,
+            """
+            <div class="note-item">
+              <div class="footer">
+                <div class="card-bottom-wrapper">
+                  <a class="author" href="/user/profile/user-003?xsec_source=pc_search">U3</a>
+                </div>
+              </div>
+            </div>
+            """,
+        ],
+        "护肤博主": [""],
+        "彩妆博主": [""],
+        "化妆博主": [""],
+    }
+    client = FakeClient(pages=pages, search_pages=search_pages)
+    config = CrawlConfig(
+        seed_url="https://www.xiaohongshu.com/user/profile/user-001",
+        storage_state="state.json",
+        output_dir="out",
+        max_accounts=10,
+        max_depth=1,
+        include_note_recommendations=False,
+    )
+
+    result = run_crawl_seed_with_client(config, client)
+
+    assert [account.account_id for account in result.accounts] == [
+        "user-001",
+        "user-002",
+        "user-003",
+    ]
+
+
+def test_run_crawl_seed_aborts_gracefully_when_risk_control_triggers():
+    class RiskyClient(FakeClient):
+        def fetch_search_result_htmls(self, query):
+            raise RiskControlTriggered("risk control threshold reached")
+
+    pages = {
+        "https://www.xiaohongshu.com/user/profile/user-001": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-001</div>
+          <h1 class="user-name">Seed</h1>
+          <div class="user-bio">美妆内容分享</div>
+          <div class="user-tags"><span>美妆博主</span></div>
+          <div class="user-followers">粉丝 35.1万</div>
+        </section>
+        """,
+    }
+    client = RiskyClient(pages=pages)
+    config = CrawlConfig(
+        seed_url="https://www.xiaohongshu.com/user/profile/user-001",
+        storage_state="state.json",
+        output_dir="out",
+        max_accounts=10,
+        max_depth=1,
+        include_note_recommendations=False,
+        safe_mode=True,
+    )
+
+    result = run_crawl_seed_with_client(config, client)
+
+    assert [account.account_id for account in result.accounts] == ["user-001"]
+    assert result.run_report.aborted is True
+    assert result.run_report.abort_reason == "risk control threshold reached"
+    assert result.run_report.errors[-1]["error"] == "risk control threshold reached"

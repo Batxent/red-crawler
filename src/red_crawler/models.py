@@ -69,6 +69,8 @@ class RunReport:
     succeeded_accounts: int
     failed_accounts: int
     lead_counts: Dict[str, int]
+    aborted: bool = False
+    abort_reason: Optional[str] = None
     errors: List[Dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:

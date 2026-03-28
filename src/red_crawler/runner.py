@@ -15,7 +15,11 @@ from red_crawler.crawl.similar import (
 )
 from red_crawler.extract.contacts import extract_contact_leads
 from red_crawler.models import AccountRecord, ContactLead, CrawlResult, RunReport
-from red_crawler.session import BrowserSession, PlaywrightCrawlerClient
+from red_crawler.session import (
+    BrowserSession,
+    PlaywrightCrawlerClient,
+    RiskControlTriggered,
+)
 
 
 class CrawlClient(Protocol):
@@ -23,7 +27,7 @@ class CrawlClient(Protocol):
 
     def fetch_note_recommendation_html(self, profile_url: str) -> list[str]: ...
 
-    def fetch_search_result_html(self, query: str) -> str: ...
+    def fetch_search_result_htmls(self, query: str) -> list[str]: ...
 
 
 @dataclass
@@ -34,11 +38,12 @@ class CrawlConfig:
     max_accounts: int = 20
     max_depth: int = 2
     include_note_recommendations: bool = False
+    safe_mode: bool = False
 
 
 def run_crawl_seed(config: CrawlConfig) -> CrawlResult:
     with BrowserSession(config.storage_state) as session:
-        client = PlaywrightCrawlerClient(session)
+        client = PlaywrightCrawlerClient(session, safe_mode=config.safe_mode)
         return run_crawl_seed_with_client(config, client)
 
 
@@ -52,6 +57,8 @@ def run_crawl_seed_with_client(
     accounts: list[AccountRecord] = []
     contact_leads: list[ContactLead] = []
     errors: list[dict[str, str]] = []
+    aborted = False
+    abort_reason: str | None = None
 
     while queue and len(accounts) < config.max_accounts:
         profile_url, depth, source_type, source_from = queue.popleft()
@@ -78,6 +85,11 @@ def run_crawl_seed_with_client(
                     bio_text=account.bio_text,
                 )
             )
+        except RiskControlTriggered as exc:
+            aborted = True
+            abort_reason = str(exc)
+            errors.append({"profile_url": profile_url, "error": str(exc)})
+            break
         except Exception as exc:
             accounts.append(
                 build_failed_account_record(
@@ -122,16 +134,28 @@ def run_crawl_seed_with_client(
                 "visible_metadata": account.visible_metadata,
             }
             for query in build_search_queries(seed_payload):
-                search_html = client.fetch_search_result_html(query)
                 extra_slots = config.max_accounts - len(queued_urls)
                 if extra_slots <= 0:
                     break
-                search_candidates.extend(
-                    extract_search_result_profiles(
-                        html=search_html,
-                        max_results=extra_slots,
+                try:
+                    search_htmls = client.fetch_search_result_htmls(query)
+                except RiskControlTriggered as exc:
+                    aborted = True
+                    abort_reason = str(exc)
+                    errors.append({"profile_url": profile_url, "error": str(exc)})
+                    break
+                for search_html in search_htmls:
+                    extra_slots = config.max_accounts - len(queued_urls)
+                    if extra_slots <= 0:
+                        break
+                    search_candidates.extend(
+                        extract_search_result_profiles(
+                            html=search_html,
+                            max_results=extra_slots,
+                        )
                     )
-                )
+                if aborted:
+                    break
 
             filtered_search_candidates = []
             for candidate in search_candidates:
@@ -146,6 +170,11 @@ def run_crawl_seed_with_client(
                         source_type="recommended",
                         source_from=account.account_id,
                     )
+                except RiskControlTriggered as exc:
+                    aborted = True
+                    abort_reason = str(exc)
+                    errors.append({"profile_url": candidate_url, "error": str(exc)})
+                    break
                 except Exception:
                     continue
                 candidate_payload = {
@@ -158,6 +187,8 @@ def run_crawl_seed_with_client(
                     candidate_account=candidate_payload,
                 ):
                     filtered_search_candidates.append(candidate)
+            if aborted:
+                break
 
             recommendation_candidates = filtered_search_candidates
 
@@ -176,6 +207,8 @@ def run_crawl_seed_with_client(
             )
             if len(queued_urls) >= config.max_accounts:
                 break
+        if aborted:
+            break
 
     lead_counts = dict(sorted(Counter(lead.lead_type for lead in contact_leads).items()))
     failed_accounts = sum(1 for account in accounts if account.crawl_status != "success")
@@ -210,6 +243,8 @@ def run_crawl_seed_with_client(
             succeeded_accounts=len(accounts) - failed_accounts,
             failed_accounts=failed_accounts,
             lead_counts=lead_counts,
+            aborted=aborted,
+            abort_reason=abort_reason,
             errors=errors,
         ),
     )
