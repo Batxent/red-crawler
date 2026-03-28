@@ -62,3 +62,46 @@ def test_extract_similar_profiles_ignores_non_recommendation_profile_links():
     )
 
     assert profiles == []
+
+
+def test_extract_similar_profiles_falls_back_to_note_comment_authors():
+    html = """
+    <html>
+      <body>
+        <div class="comment-inner-container">
+          <div class="author-wrapper">
+            <a class="name" href="/user/profile/user-001?xsec_source=pc_comment">LL</a>
+          </div>
+        </div>
+        <div class="comment-inner-container">
+          <div class="author-wrapper">
+            <a class="name" href="/user/profile/user-002?xsec_source=pc_comment">相似博主A</a>
+          </div>
+        </div>
+        <div class="comment-inner-container">
+          <div class="author-wrapper">
+            <a class="name" href="/user/profile/user-003?xsec_source=pc_comment">相似博主B</a>
+          </div>
+        </div>
+      </body>
+    </html>
+    """
+
+    profiles = extract_similar_profiles(
+        html=html,
+        base_profile_url="https://www.xiaohongshu.com/user/profile/user-001",
+        max_results=5,
+    )
+
+    assert profiles == [
+        {
+            "account_id": "user-002",
+            "profile_url": "https://www.xiaohongshu.com/user/profile/user-002?xsec_source=pc_comment",
+            "nickname": "相似博主A",
+        },
+        {
+            "account_id": "user-003",
+            "profile_url": "https://www.xiaohongshu.com/user/profile/user-003?xsec_source=pc_comment",
+            "nickname": "相似博主B",
+        },
+    ]

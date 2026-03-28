@@ -75,13 +75,7 @@ class PlaywrightCrawlerClient:
 
     def fetch_note_recommendation_html(self, profile_url: str) -> List[str]:
         profile_html = self.fetch_profile_html(profile_url)
-        note_links = []
-        for href in re.findall(r'href="([^"]*/explore/[^"]+)"', profile_html):
-            resolved = urljoin(f"{self.base_url}/", href)
-            if resolved not in note_links:
-                note_links.append(resolved)
-            if len(note_links) >= 3:
-                break
+        note_links = extract_note_detail_urls(profile_html, self.base_url, max_results=3)
         return [self._load_html(note_url) for note_url in note_links]
 
 
@@ -128,3 +122,18 @@ def open_xiaohongshu(
                 tty.readline()
         finally:
             browser.close()
+
+
+def extract_note_detail_urls(
+    profile_html: str,
+    base_url: str = "https://www.xiaohongshu.com",
+    max_results: int = 3,
+) -> List[str]:
+    note_links: List[str] = []
+    for href in re.findall(r'href="([^"]*/user/profile/[^"]+xsec_source=pc_user[^"]*)"', profile_html):
+        resolved = urljoin(f"{base_url.rstrip('/')}/", href.replace("&amp;", "&"))
+        if resolved not in note_links:
+            note_links.append(resolved)
+        if len(note_links) >= max_results:
+            break
+    return note_links
