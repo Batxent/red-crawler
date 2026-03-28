@@ -60,3 +60,48 @@ def test_extract_contact_leads_supports_single_letter_v_alias():
     by_type = {lead.lead_type: lead for lead in leads}
 
     assert by_type["wechat"].normalized_value == "lucky_mia88"
+
+
+def test_extract_contact_leads_recovers_spelled_out_email_domains():
+    bio = (
+        "工作邮箱：mia艾特gmail点com，备用邮箱：brand_hezuo@163点com，"
+        "也可联系：team艾特outlook点com"
+    )
+
+    leads = extract_contact_leads(account_id="user-006", bio_text=bio)
+    emails = [lead.normalized_value for lead in leads if lead.lead_type == "email"]
+
+    assert "mia@gmail.com" in emails
+    assert "brand_hezuo@163.com" in emails
+    assert "team@outlook.com" in emails
+
+
+def test_extract_contact_leads_keeps_redirected_account_hints():
+    bio = "日常在@蕾大哥爱火锅，小号在@LuckyMiaDaily，工作联系见主页"
+
+    leads = extract_contact_leads(account_id="user-007", bio_text=bio)
+    hints = [lead for lead in leads if lead.lead_type == "other_hint"]
+
+    assert sorted(lead.normalized_value for lead in hints) == sorted([
+        "日常在@蕾大哥爱火锅",
+        "小号在@LuckyMiaDaily",
+    ])
+
+
+def test_extract_contact_leads_supports_more_wechat_alias_variants():
+    bio = "合作请加卫星号：Lucky_mia88，或者 wx：Lucky_mia88，w x: Lucky_mia88"
+
+    leads = extract_contact_leads(account_id="user-008", bio_text=bio)
+    wechats = [lead.normalized_value for lead in leads if lead.lead_type == "wechat"]
+
+    assert wechats == ["lucky_mia88"]
+
+
+def test_extract_contact_leads_keeps_soft_wechat_hints():
+    bio = "加V看置顶，微❤️：置顶自取，合作前先看简介"
+
+    leads = extract_contact_leads(account_id="user-009", bio_text=bio)
+    hints = [lead.normalized_value for lead in leads if lead.lead_type == "other_hint"]
+
+    assert "加V看置顶" in hints
+    assert "微❤️：置顶自取" in hints

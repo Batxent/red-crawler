@@ -6,6 +6,9 @@ from typing import Iterable, List
 from red_crawler.models import ContactLead
 
 EMAIL_RE = re.compile(r"([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})")
+OBFUSCATED_EMAIL_RE = re.compile(
+    r"([A-Za-z0-9._%+-]+)\s*(?:@|艾特|at|AT)\s*([A-Za-z0-9-]+)\s*(?:\.|点)\s*(com|cn|net)"
+)
 OBFUSCATED_QQ_EMAIL_RE = re.compile(
     r"(?<![A-Za-z0-9._%+-])([1-9]\d{4,11})\s*@\s*(?:qq|QQ|q|Q|企鹅|🐧)\s*(?:\.|点)\s*com\b"
 )
@@ -14,12 +17,17 @@ QQ_MAIL_LABEL_RE = re.compile(
 )
 PHONE_RE = re.compile(r"(?<!\d)(1[3-9]\d{9})(?!\d)")
 WECHAT_RE = re.compile(
-    r"(?:(?:微信|vx|wx|VX|WX|v信|微(?:信|x)|薇|薇信|卫星)\s*[:：]?\s*|(?<![A-Za-z0-9_])[vV]\s*[:：]\s*)"
+    r"(?:(?:微信|vx|v x|wx|w x|VX|WX|v信|微(?:信|x)|薇|薇信|卫星|卫星号)\s*[:：]?\s*|(?<![A-Za-z0-9_])[vV]\s*[:：]\s*)"
     r"([A-Za-z][A-Za-z0-9_-]{5,19})"
 )
 QQ_RE = re.compile(r"(?:QQ|qq|扣扣)\s*[:：]?\s*([1-9]\d{4,11})")
 BUSINESS_NOTE_RE = re.compile(r"([^，。；;\n]*(?:备注|品牌名)[^，。；;\n]*)")
 MANAGER_RE = re.compile(r"([^，。；;\n]*(?:经纪人|商务对接|商务联系)[^，。；;\n]*)")
+REDIRECT_ACCOUNT_RE = re.compile(r"([^，。；;\n]*(?:日常在|小号在|大号在|备用号在)\s*@[\w\u4e00-\u9fff._-]+)")
+SOFT_WECHAT_HINT_RE = re.compile(
+    r"([^，。；;\n]*(?:加[Vv]|加微|加薇)[^，。；;\n]*(?:置顶|自取)[^，。；;\n]*|"
+    r"[^，。；;\n]*微[^，。；;\n]{0,4}[:：]\s*置顶自取[^，。；;\n]*)"
+)
 
 
 def _clean_text(text: str) -> str:
@@ -52,6 +60,21 @@ def extract_contact_leads(account_id: str, bio_text: str) -> List[ContactLead]:
                 raw_snippet=match.group(1),
                 confidence=0.96,
                 extractor_name="email_regex",
+                source_field="bio",
+                dedupe_key=f"email:{email}",
+            )
+        )
+
+    for match in OBFUSCATED_EMAIL_RE.finditer(text):
+        email = f"{match.group(1).lower()}@{match.group(2).lower()}.{match.group(3).lower()}"
+        leads.append(
+            ContactLead(
+                account_id=account_id,
+                lead_type="email",
+                normalized_value=email,
+                raw_snippet=match.group(0).strip(" ，。;；"),
+                confidence=0.9,
+                extractor_name="obfuscated_email_regex",
                 source_field="bio",
                 dedupe_key=f"email:{email}",
             )
@@ -159,6 +182,36 @@ def extract_contact_leads(account_id: str, bio_text: str) -> List[ContactLead]:
                 extractor_name="manager_regex",
                 source_field="bio",
                 dedupe_key=f"manager:{snippet}",
+            )
+        )
+
+    for match in REDIRECT_ACCOUNT_RE.finditer(text):
+        snippet = match.group(1).strip(" ，。;；")
+        leads.append(
+            ContactLead(
+                account_id=account_id,
+                lead_type="other_hint",
+                normalized_value=snippet,
+                raw_snippet=snippet,
+                confidence=0.46,
+                extractor_name="redirect_account_regex",
+                source_field="bio",
+                dedupe_key=f"other_hint:{snippet}",
+            )
+        )
+
+    for match in SOFT_WECHAT_HINT_RE.finditer(text):
+        snippet = match.group(1).strip(" ，。;；")
+        leads.append(
+            ContactLead(
+                account_id=account_id,
+                lead_type="other_hint",
+                normalized_value=snippet,
+                raw_snippet=snippet,
+                confidence=0.4,
+                extractor_name="soft_wechat_hint_regex",
+                source_field="bio",
+                dedupe_key=f"other_hint:{snippet}",
             )
         )
 
