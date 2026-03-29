@@ -87,6 +87,21 @@ Key outputs:
 - SQLite database:
   - `data/red_crawler.db`
 
+## OpenClaw
+
+The OpenClaw skill for this project lives at `openclaw-skills/red-crawler-ops/`.
+
+To install it from a local path, point OpenClaw at that folder, or copy the skill directory into your OpenClaw skills location and register the same path.
+
+Before using the skill, run:
+
+```bash
+uv sync
+uv run playwright install chromium
+```
+
+Create a `state.json` file with the `login` action before running any non-login action such as `crawl_seed`, `collect_nightly`, `report_weekly`, or `list_contactable`.
+
 ## launchd
 
 For macOS local scheduling, use the template at [docs/launchd/red-crawler.collect-nightly.plist](/Users/tommy/Documents/GitHubOpenSources/red-crawler/docs/launchd/red-crawler.collect-nightly.plist).

@@ -1,0 +1,99 @@
+# red-crawler-ops
+
+Use this skill when you need to operate the `red-crawler` CLI from an OpenClaw workflow. It is the portable wrapper for the repo's existing crawler runtime, not a separate crawler implementation.
+
+## When To Use
+
+Use `red-crawler-ops` for:
+
+- saving a login session into Playwright storage state
+- crawling a seed Xiaohongshu profile
+- running nightly collection against a workspace database
+- exporting a weekly report
+- listing contactable creators from the SQLite database
+
+## Supported Actions
+
+- `login`
+- `crawl_seed`
+- `collect_nightly`
+- `report_weekly`
+- `list_contactable`
+
+## Example Prompts
+
+- "Run `login` for this workspace and save the browser session to `state.json`."
+- "Crawl this seed profile with a depth of 2 and write outputs into `output/`."
+- "Run the nightly collector against the workspace database and report directory."
+- "Export this week's report and return the generated artifacts."
+- "List contactable creators from the database as CSV."
+
+## Prerequisites
+
+- The workspace must be the `red-crawler` repository root.
+- `uv sync` must be run in the workspace before the first action.
+- Chromium must be installed with `uv run playwright install chromium`.
+- A valid Playwright storage state file must exist before any non-`login` action.
+- The workspace must contain `pyproject.toml`.
+
+## Safety Limits
+
+- Do not run this skill outside a local `red-crawler` workspace.
+- Do not point it at production data or unknown databases.
+- Do not assume a browser session exists; create `state.json` with `login` first.
+- Do not hard-code machine-specific paths in prompts or config.
+- Prefer relative, workspace-scoped paths for outputs and reports.
+
+## Input Shape
+
+Provide an object with `action` plus optional fields used by the selected action. Common fields include:
+
+- `workspace_path`
+- `runner_command`
+- `storage_state`
+- `db_path`
+- `report_dir`
+- `output_dir`
+- `cache_dir`
+
+Action-specific fields include:
+
+- `seed_url`
+- `login_url`
+- `max_accounts`
+- `max_depth`
+- `include_note_recommendations`
+- `safe_mode`
+- `cache_ttl_days`
+- `crawl_budget`
+- `search_term_limit`
+- `startup_jitter_minutes`
+- `slot_name`
+- `days`
+- `lead_type`
+- `creator_segment`
+- `min_relevance_score`
+- `limit`
+- `format`
+
+## Output Shape
+
+Successful runs return:
+
+- `status`
+- `action`
+- `command`
+- `summary`
+- `artifacts`
+- `stdout`
+- `stderr`
+
+Error runs return:
+
+- `status`
+- `action`
+- `error_type`
+- `message`
+- `suggested_fix`
+- `command` when the action reached execution
+- `stdout` and `stderr` when available

@@ -1,0 +1,131 @@
+name: red-crawler-ops
+version: 1.0.0
+runtime: python
+entry: src/index.py
+description: Portable OpenClaw skill for running the red-crawler CLI across login, crawl, collection, and reporting workflows.
+config:
+  workspace_path:
+    type: string
+    default: .
+    description: Path to the red-crawler repository root.
+  storage_state:
+    type: string
+    default: ./state.json
+    description: Playwright storage state file used for authenticated actions.
+  db_path:
+    type: string
+    default: ./data/red_crawler.db
+    description: SQLite database path inside the workspace.
+  report_dir:
+    type: string
+    default: ./reports
+    description: Directory for generated report artifacts.
+  output_dir:
+    type: string
+    default: ./output
+    description: Directory for crawl exports.
+  cache_dir:
+    type: string
+    default: ./.cache/red-crawler
+    description: Directory for crawler cache files.
+  runner_command:
+    type: [string, array]
+    default: uv run red-crawler
+    description: Command prefix used to launch the red-crawler CLI.
+input_schema:
+  type: object
+  required:
+    - action
+  properties:
+    action:
+      type: string
+      enum:
+        - login
+        - crawl_seed
+        - collect_nightly
+        - report_weekly
+        - list_contactable
+    workspace_path:
+      type: string
+    runner_command:
+      oneOf:
+        - type: string
+        - type: array
+          items:
+            type: string
+    storage_state:
+      type: string
+    seed_url:
+      type: string
+    login_url:
+      type: string
+    output_dir:
+      type: string
+    db_path:
+      type: string
+    report_dir:
+      type: string
+    cache_dir:
+      type: string
+    max_accounts:
+      type: integer
+    max_depth:
+      type: integer
+    include_note_recommendations:
+      type: boolean
+    safe_mode:
+      type: boolean
+    cache_ttl_days:
+      type: integer
+    crawl_budget:
+      type: integer
+    search_term_limit:
+      type: integer
+    startup_jitter_minutes:
+      type: integer
+    slot_name:
+      type: string
+    days:
+      type: integer
+    lead_type:
+      type: string
+    creator_segment:
+      type: string
+    min_relevance_score:
+      type: number
+    limit:
+      type: integer
+    format:
+      type: string
+output_schema:
+  type: object
+  properties:
+    status:
+      type: string
+      enum: [success, error]
+    summary:
+      type: string
+    artifacts:
+      type: object
+      additionalProperties:
+        type: string
+    metrics:
+      type: object
+      additionalProperties: true
+    next_step:
+      type: string
+    error:
+      type: object
+      properties:
+        error_type:
+          type: string
+        message:
+          type: string
+        suggested_fix:
+          type: string
+        command:
+          type: string
+        stdout:
+          type: string
+        stderr:
+          type: string

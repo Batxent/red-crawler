@@ -1,0 +1,7 @@
+workspace_path: ./red-crawler
+storage_state: ./state.json
+db_path: ./data/red_crawler.db
+report_dir: ./reports
+output_dir: ./output
+cache_dir: ./.cache/red-crawler
+runner_command: uv run red-crawler

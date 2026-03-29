@@ -13,10 +13,17 @@ INDEX_MODULE = importlib.util.module_from_spec(INDEX_SPEC)
 INDEX_SPEC.loader.exec_module(INDEX_MODULE)
 handler = INDEX_MODULE.handler
 build_command = INDEX_MODULE.build_command
+SKILL_DIR = Path(__file__).resolve().parents[1]
 
 
 def run_handler(input_data, context):
     return asyncio.run(handler(input_data, context))
+
+
+def test_skill_metadata_files_exist():
+    assert (SKILL_DIR / "SKILL.md").is_file()
+    assert (SKILL_DIR / "manifest.yaml").is_file()
+    assert (SKILL_DIR / "config.example.yaml").is_file()
 
 
 def test_crawl_seed_requires_seed_url():
