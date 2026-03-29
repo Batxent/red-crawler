@@ -99,5 +99,5 @@ Error runs return:
 - `error_type`
 - `message`
 - `suggested_fix`
-- `command` when the action reached execution
-- `stdout` and `stderr` when available
+- `action`, `command`, `stdout`, and `stderr` for execution-time failures
+- Early validation or configuration failures may omit `action`, `command`, `stdout`, and `stderr`

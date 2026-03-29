@@ -60,6 +60,11 @@ def test_skill_docs_match_storage_state_behavior():
     assert "collect_nightly" in SKILL_TEXT
     assert "report_weekly" in SKILL_TEXT
     assert "list_contactable" in SKILL_TEXT
+    assert "execution-time failures" in SKILL_TEXT
+    assert (
+        "Early validation or configuration failures may omit `action`, `command`, "
+        "`stdout`, and `stderr`"
+    ) in SKILL_TEXT
     assert "Save a reusable login session first" in README_TEXT
     assert "Run a manual crawl with an existing Playwright storage state file" in README_TEXT
     assert "List high-quality contactable creators from the SQLite database" in README_TEXT
