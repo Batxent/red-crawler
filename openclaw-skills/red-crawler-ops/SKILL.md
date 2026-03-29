@@ -39,6 +39,8 @@ Use `red-crawler-ops` for:
 ## Safety Limits
 
 - Do not run this skill outside a local `red-crawler` workspace.
+- Do not install dependencies; `uv sync` and Playwright setup are required beforehand.
+- Do not create login sessions silently; use the explicit `login` action so the user can complete authentication.
 - Do not point it at production data or unknown databases.
 - Do not assume a browser session exists; create `state.json` with `login` first.
 - Do not hard-code machine-specific paths in prompts or config.
