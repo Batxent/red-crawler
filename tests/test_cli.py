@@ -10,6 +10,8 @@ def test_cli_crawl_seed_exports_expected_files(tmp_path, monkeypatch):
         assert config.seed_url == "https://www.xiaohongshu.com/user/profile/user-001"
         assert config.max_depth == 2
         assert config.safe_mode is True
+        assert config.cache_dir == str(tmp_path / "cache")
+        assert config.cache_ttl_days == 7
         return CrawlResult(
             accounts=[
                 AccountRecord(
@@ -56,6 +58,8 @@ def test_cli_crawl_seed_exports_expected_files(tmp_path, monkeypatch):
             "--storage-state",
             "state.json",
             "--safe-mode",
+            "--cache-dir",
+            str(tmp_path / "cache"),
             "--output-dir",
             str(tmp_path),
         ]

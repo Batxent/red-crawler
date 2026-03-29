@@ -20,6 +20,8 @@ def build_parser() -> argparse.ArgumentParser:
     crawl_seed.add_argument("--max-depth", type=int, default=2)
     crawl_seed.add_argument("--include-note-recommendations", action="store_true")
     crawl_seed.add_argument("--safe-mode", action="store_true")
+    crawl_seed.add_argument("--cache-dir")
+    crawl_seed.add_argument("--cache-ttl-days", type=int, default=7)
     crawl_seed.add_argument("--output-dir", default="output")
 
     login = subparsers.add_parser("login")
@@ -62,6 +64,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_depth=args.max_depth,
         include_note_recommendations=args.include_note_recommendations,
         safe_mode=args.safe_mode,
+        cache_dir=args.cache_dir,
+        cache_ttl_days=args.cache_ttl_days,
     )
     result = run_crawl_seed(config)
     export_run(result, output_dir)

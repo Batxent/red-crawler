@@ -39,11 +39,18 @@ class CrawlConfig:
     max_depth: int = 2
     include_note_recommendations: bool = False
     safe_mode: bool = False
+    cache_dir: str | None = None
+    cache_ttl_days: int = 7
 
 
 def run_crawl_seed(config: CrawlConfig) -> CrawlResult:
     with BrowserSession(config.storage_state) as session:
-        client = PlaywrightCrawlerClient(session, safe_mode=config.safe_mode)
+        client = PlaywrightCrawlerClient(
+            session,
+            safe_mode=config.safe_mode,
+            cache_dir=config.cache_dir,
+            cache_ttl_days=config.cache_ttl_days,
+        )
         return run_crawl_seed_with_client(config, client)
 
 

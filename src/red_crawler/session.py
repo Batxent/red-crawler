@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import random
 import re
 import time
@@ -128,6 +130,9 @@ class PlaywrightCrawlerClient:
         base_url: str = "https://www.xiaohongshu.com",
         safe_mode: bool = False,
         safe_mode_controller: SafeModeController | None = None,
+        cache_dir: str | Path | None = None,
+        cache_ttl_days: int = 7,
+        time_fn: Callable[[], float] = time.time,
     ):
         self.session = session
         self.base_url = base_url.rstrip("/")
@@ -135,6 +140,28 @@ class PlaywrightCrawlerClient:
             enabled=safe_mode,
             log_fn=print if safe_mode else (lambda _message: None),
         )
+        self._profile_html_cache: dict[str, str] = {}
+        self._search_html_cache: dict[str, List[str]] = {}
+        self.cache_dir = Path(cache_dir) if cache_dir is not None else None
+        self.cache_ttl_seconds = max(cache_ttl_days, 0) * 24 * 60 * 60
+        self.time_fn = time_fn
+        if self.cache_dir is not None:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            (self.cache_dir / "profiles").mkdir(exist_ok=True)
+            (self.cache_dir / "search").mkdir(exist_ok=True)
+
+    def _cache_path(self, kind: str, key: str) -> Path | None:
+        if self.cache_dir is None:
+            return None
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        suffix = ".json" if kind == "search" else ".html"
+        return self.cache_dir / kind / f"{digest}{suffix}"
+
+    def _is_cache_fresh(self, cache_path: Path) -> bool:
+        if self.cache_ttl_seconds <= 0:
+            return False
+        age = self.time_fn() - cache_path.stat().st_mtime
+        return age <= self.cache_ttl_seconds
 
     def _load_html(self, url: str) -> str:
         self.safe_mode_controller.before_request()
@@ -203,7 +230,23 @@ class PlaywrightCrawlerClient:
             page.close()
 
     def fetch_profile_html(self, profile_url: str) -> str:
-        return self._load_html(profile_url)
+        cached = self._profile_html_cache.get(profile_url)
+        if cached is not None:
+            return cached
+        cache_path = self._cache_path("profiles", profile_url)
+        if cache_path is not None and cache_path.exists():
+            if self._is_cache_fresh(cache_path):
+                self.safe_mode_controller.log_fn("safe-mode: loaded profile from disk cache")
+                html = cache_path.read_text(encoding="utf-8")
+                self._profile_html_cache[profile_url] = html
+                return html
+            self.safe_mode_controller.log_fn("safe-mode: disk cache expired for profile")
+        html = self._load_html(profile_url)
+        self._profile_html_cache[profile_url] = html
+        if cache_path is not None:
+            cache_path.write_text(html, encoding="utf-8")
+            self.safe_mode_controller.log_fn("safe-mode: wrote profile cache to disk")
+        return html
 
     def fetch_note_recommendation_html(self, profile_url: str) -> List[str]:
         profile_html = self.fetch_profile_html(profile_url)
@@ -211,8 +254,27 @@ class PlaywrightCrawlerClient:
         return [self._load_html(note_url) for note_url in note_links]
 
     def fetch_search_result_htmls(self, query: str) -> List[str]:
+        cached = self._search_html_cache.get(query)
+        if cached is not None:
+            return list(cached)
+        cache_path = self._cache_path("search", query)
+        if cache_path is not None and cache_path.exists():
+            if self._is_cache_fresh(cache_path):
+                self.safe_mode_controller.log_fn("safe-mode: loaded search from disk cache")
+                htmls = json.loads(cache_path.read_text(encoding="utf-8"))
+                self._search_html_cache[query] = list(htmls)
+                return list(htmls)
+            self.safe_mode_controller.log_fn("safe-mode: disk cache expired for search")
         search_url = f"{self.base_url}/search_result?keyword={quote(query)}&source=web_explore_feed"
-        return self._load_search_result_htmls(search_url)
+        htmls = self._load_search_result_htmls(search_url)
+        self._search_html_cache[query] = list(htmls)
+        if cache_path is not None:
+            cache_path.write_text(
+                json.dumps(htmls, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            self.safe_mode_controller.log_fn("safe-mode: wrote search cache to disk")
+        return list(htmls)
 
 
 def save_login_storage_state(
