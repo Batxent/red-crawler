@@ -27,6 +27,12 @@ EXPECTED_ARTIFACTS = {
     ),
 }
 
+CONFIG_DEFAULTS = (
+    ("default_crawl_budget", "crawl_budget"),
+    ("default_report_days", "days"),
+    ("default_list_limit", "limit"),
+)
+
 
 def extract_config(context):
     if not isinstance(context, dict):
@@ -47,6 +53,9 @@ def merge_config(input_data, context):
     for key, value in input_data.items():
         if value is not None:
             merged[key] = value
+    for default_key, target_key in CONFIG_DEFAULTS:
+        if target_key not in merged and merged.get(default_key) is not None:
+            merged[target_key] = merged[default_key]
     return merged
 
 

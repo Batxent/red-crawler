@@ -33,7 +33,9 @@ Use `red-crawler-ops` for:
 - The workspace must be the `red-crawler` repository root.
 - `uv sync` must be run in the workspace before the first action.
 - Chromium must be installed with `uv run playwright install chromium`.
-- A valid Playwright storage state file must exist before any non-`login` action.
+- `login` creates the Playwright storage state explicitly.
+- `crawl_seed` and `collect_nightly` require an authenticated Playwright storage state file.
+- `report_weekly` and `list_contactable` run from the database and do not require storage state.
 - The workspace must contain `pyproject.toml`.
 
 ## Safety Limits

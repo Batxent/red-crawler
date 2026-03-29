@@ -32,6 +32,18 @@ config:
     type: [string, array]
     default: uv run red-crawler
     description: Command prefix used to launch the red-crawler CLI.
+  default_crawl_budget:
+    type: integer
+    default: 30
+    description: Default crawl budget used when collect_nightly does not receive one.
+  default_report_days:
+    type: integer
+    default: 7
+    description: Default report window used when report_weekly does not receive one.
+  default_list_limit:
+    type: integer
+    default: 20
+    description: Default list limit used when list_contactable does not receive one.
 input_schema:
   type: object
   required:
@@ -103,29 +115,23 @@ output_schema:
     status:
       type: string
       enum: [success, error]
+    action:
+      type: string
+    command:
+      type: string
     summary:
       type: string
     artifacts:
       type: object
       additionalProperties:
         type: string
-    metrics:
-      type: object
-      additionalProperties: true
-    next_step:
+    stdout:
       type: string
-    error:
-      type: object
-      properties:
-        error_type:
-          type: string
-        message:
-          type: string
-        suggested_fix:
-          type: string
-        command:
-          type: string
-        stdout:
-          type: string
-        stderr:
-          type: string
+    stderr:
+      type: string
+    error_type:
+      type: string
+    message:
+      type: string
+    suggested_fix:
+      type: string

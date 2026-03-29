@@ -14,16 +14,62 @@ INDEX_SPEC.loader.exec_module(INDEX_MODULE)
 handler = INDEX_MODULE.handler
 build_command = INDEX_MODULE.build_command
 SKILL_DIR = Path(__file__).resolve().parents[1]
+MANIFEST_TEXT = (SKILL_DIR / "manifest.yaml").read_text(encoding="utf-8")
+SKILL_TEXT = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+CONFIG_EXAMPLE_TEXT = (SKILL_DIR / "config.example.yaml").read_text(
+    encoding="utf-8"
+)
+README_TEXT = (SKILL_DIR.parents[1] / "README.md").read_text(encoding="utf-8")
 
 
 def run_handler(input_data, context):
     return asyncio.run(handler(input_data, context))
 
 
-def test_skill_metadata_files_exist():
-    assert (SKILL_DIR / "SKILL.md").is_file()
-    assert (SKILL_DIR / "manifest.yaml").is_file()
-    assert (SKILL_DIR / "config.example.yaml").is_file()
+def test_skill_metadata_contract_matches_runtime():
+    output_schema = MANIFEST_TEXT.split("output_schema:", 1)[1]
+    assert "runtime: python" in MANIFEST_TEXT
+    assert "entry: src/index.py" in MANIFEST_TEXT
+    assert "default_crawl_budget:" in MANIFEST_TEXT
+    assert "default_report_days:" in MANIFEST_TEXT
+    assert "default_list_limit:" in MANIFEST_TEXT
+    assert "command:" in output_schema
+    assert "summary:" in output_schema
+    assert "artifacts:" in output_schema
+    assert "stdout:" in output_schema
+    assert "stderr:" in output_schema
+    assert "error_type:" in output_schema
+    assert "message:" in output_schema
+    assert "suggested_fix:" in output_schema
+    assert "\n    error:\n" not in output_schema
+    assert "runner_command:" in CONFIG_EXAMPLE_TEXT
+    assert "- <runner-command>" in CONFIG_EXAMPLE_TEXT
+    assert "default_crawl_budget: 30" in CONFIG_EXAMPLE_TEXT
+    assert "default_report_days: 7" in CONFIG_EXAMPLE_TEXT
+    assert "default_list_limit: 20" in CONFIG_EXAMPLE_TEXT
+
+
+def test_skill_docs_match_storage_state_behavior():
+    assert "`login` creates the Playwright storage state explicitly." in SKILL_TEXT
+    assert (
+        "`crawl_seed` and `collect_nightly` require an authenticated Playwright "
+        "storage state file."
+    ) in SKILL_TEXT
+    assert (
+        "`report_weekly` and `list_contactable` run from the database and do not "
+        "require storage state."
+    ) in SKILL_TEXT
+    assert (
+        "`crawl-seed` and `collect-nightly` require an authenticated Playwright "
+        "storage state file"
+    ) in README_TEXT
+    assert (
+        "`report-weekly` and `list-contactable` operate from the SQLite database "
+        "and do not require `--storage-state`"
+    ) in README_TEXT
+    assert (
+        "Create a reusable login session explicitly first" in README_TEXT
+    )
 
 
 def test_crawl_seed_requires_seed_url():
@@ -93,6 +139,125 @@ def test_report_weekly_does_not_require_storage_state(tmp_path, monkeypatch):
     )
     assert result["status"] == "success"
     assert result["action"] == "report_weekly"
+
+
+def test_collect_nightly_uses_default_crawl_budget_from_context_config(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+    (report_dir / "daily-run-report.json").write_text("{}", encoding="utf-8")
+    (report_dir / "weekly-growth-report.json").write_text("{}", encoding="utf-8")
+    (report_dir / "contactable_creators.csv").write_text("id\n1\n", encoding="utf-8")
+
+    def fake_run(argv, cwd, capture_output, text):
+        assert argv == [
+            "uv",
+            "run",
+            "red-crawler",
+            "collect-nightly",
+            "--storage-state",
+            str(tmp_path / "state.json"),
+            "--db-path",
+            str(tmp_path / "data.db"),
+            "--report-dir",
+            str(report_dir),
+            "--crawl-budget",
+            "30",
+        ]
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(INDEX_MODULE.subprocess, "run", fake_run)
+
+    result = run_handler(
+        {
+            "action": "collect_nightly",
+            "workspace_path": str(tmp_path),
+            "storage_state": str(tmp_path / "state.json"),
+            "db_path": str(tmp_path / "data.db"),
+            "report_dir": str(report_dir),
+        },
+        {"config": {"default_crawl_budget": 30}},
+    )
+
+    assert result["status"] == "success"
+    assert result["action"] == "collect_nightly"
+
+
+def test_report_weekly_uses_default_report_days_from_context_config(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+    (report_dir / "weekly-growth-report.json").write_text("{}", encoding="utf-8")
+    (report_dir / "contactable_creators.csv").write_text("id\n1\n", encoding="utf-8")
+
+    def fake_run(argv, cwd, capture_output, text):
+        assert argv == [
+            "uv",
+            "run",
+            "red-crawler",
+            "report-weekly",
+            "--db-path",
+            str(tmp_path / "data.db"),
+            "--report-dir",
+            str(report_dir),
+            "--days",
+            "7",
+        ]
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(INDEX_MODULE.subprocess, "run", fake_run)
+
+    result = run_handler(
+        {
+            "action": "report_weekly",
+            "workspace_path": str(tmp_path),
+            "db_path": str(tmp_path / "data.db"),
+            "report_dir": str(report_dir),
+        },
+        {"config": {"default_report_days": 7}},
+    )
+
+    assert result["status"] == "success"
+    assert result["action"] == "report_weekly"
+
+
+def test_list_contactable_uses_default_list_limit_from_context_config(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+
+    def fake_run(argv, cwd, capture_output, text):
+        assert argv == [
+            "uv",
+            "run",
+            "red-crawler",
+            "list-contactable",
+            "--db-path",
+            str(tmp_path / "data.db"),
+            "--limit",
+            "20",
+            "--format",
+            "csv",
+        ]
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(INDEX_MODULE.subprocess, "run", fake_run)
+
+    result = run_handler(
+        {
+            "action": "list_contactable",
+            "workspace_path": str(tmp_path),
+            "db_path": str(tmp_path / "data.db"),
+        },
+        {"config": {"default_list_limit": 20}},
+    )
+
+    assert result["status"] == "success"
+    assert result["action"] == "list_contactable"
 
 
 def test_list_contactable_does_not_require_storage_state(tmp_path, monkeypatch):
