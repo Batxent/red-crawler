@@ -35,6 +35,61 @@ def test_collect_nightly_requires_storage_state():
     assert "storage_state" in result["suggested_fix"]
 
 
+def test_crawl_seed_requires_storage_state(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    result = run_handler(
+        {
+            "action": "crawl_seed",
+            "workspace_path": str(tmp_path),
+            "seed_url": "https://www.xiaohongshu.com/user/profile/user-001",
+        },
+        {"config": {}},
+    )
+    assert result["status"] == "error"
+    assert result["error_type"] == "configuration_error"
+    assert "storage_state" in result["suggested_fix"]
+
+
+def test_login_requires_storage_state(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    result = run_handler(
+        {"action": "login", "workspace_path": str(tmp_path)},
+        {"config": {}},
+    )
+    assert result["status"] == "error"
+    assert result["error_type"] == "configuration_error"
+    assert "storage_state" in result["message"]
+
+
+def test_report_weekly_does_not_require_storage_state(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    result = run_handler(
+        {
+            "action": "report_weekly",
+            "workspace_path": str(tmp_path),
+            "db_path": str(tmp_path / "data.db"),
+            "report_dir": str(tmp_path / "reports"),
+        },
+        {"config": {}},
+    )
+    assert result["status"] == "success"
+    assert result["action"] == "report_weekly"
+
+
+def test_list_contactable_does_not_require_storage_state(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    result = run_handler(
+        {
+            "action": "list_contactable",
+            "workspace_path": str(tmp_path),
+            "db_path": str(tmp_path / "data.db"),
+        },
+        {"config": {}},
+    )
+    assert result["status"] == "success"
+    assert result["action"] == "list_contactable"
+
+
 def test_workspace_path_can_come_from_context_config(tmp_path):
     (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
     result = run_handler(
@@ -99,6 +154,44 @@ def test_build_login_command_uses_overrides(tmp_path):
         "state.json",
         "--login-url",
         "https://www.xiaohongshu.com/explore",
+    ]
+
+
+def test_build_command_splits_string_runner_command(tmp_path):
+    command = build_command(
+        {
+            "action": "login",
+            "workspace_path": str(tmp_path),
+            "storage_state": "state.json",
+            "runner_command": "uv run red-crawler",
+        }
+    )
+    assert command[:3] == ["uv", "run", "red-crawler"]
+    assert command[3:] == ["login", "--save-state", "state.json"]
+
+
+def test_build_command_preserves_list_runner_command(tmp_path):
+    command = build_command(
+        {
+            "action": "report_weekly",
+            "workspace_path": str(tmp_path),
+            "runner_command": ["python", "-m", "red_crawler.cli"],
+            "db_path": "data/red_crawler.db",
+            "report_dir": "reports",
+            "days": 7,
+        }
+    )
+    assert command == [
+        "python",
+        "-m",
+        "red_crawler.cli",
+        "report-weekly",
+        "--db-path",
+        "data/red_crawler.db",
+        "--report-dir",
+        "reports",
+        "--days",
+        "7",
     ]
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 from collections.abc import Sequence
 
@@ -49,7 +50,8 @@ def _get_runner_command(resolved):
     if runner_command is None:
         return ["uv", "run", "red-crawler"]
     if isinstance(runner_command, str):
-        return [runner_command]
+        parts = shlex.split(runner_command)
+        return parts if parts else ["uv", "run", "red-crawler"]
     if isinstance(runner_command, Sequence):
         return [str(part) for part in runner_command]
     return ["uv", "run", "red-crawler"]
@@ -171,10 +173,12 @@ def validate_request(resolved):
             "Provide workspace_path directly or set it in context.config.",
         )
 
-    if action != "login" and not resolved.get("storage_state"):
+    if action in {"login", "crawl_seed", "collect_nightly"} and not resolved.get(
+        "storage_state"
+    ):
         return structured_error(
             "configuration_error",
-            "storage_state is required for non-login actions.",
+            f"storage_state is required for {action}.",
             "Run login first or provide a storage_state path.",
         )
 
