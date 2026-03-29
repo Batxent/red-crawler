@@ -125,6 +125,11 @@ output_schema:
       type: object
       additionalProperties:
         type: string
+    metrics:
+      type: object
+      additionalProperties: true
+    next_step:
+      type: string
     stdout:
       type: string
     stderr:
@@ -135,3 +140,18 @@ output_schema:
       type: string
     suggested_fix:
       type: string
+    error:
+      type: object
+      properties:
+        error_type:
+          type: string
+        message:
+          type: string
+        suggested_fix:
+          type: string
+        command:
+          type: string
+        stdout:
+          type: string
+        stderr:
+          type: string

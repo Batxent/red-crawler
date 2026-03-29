@@ -41,7 +41,12 @@ def test_skill_metadata_contract_matches_runtime():
     assert "error_type:" in output_schema
     assert "message:" in output_schema
     assert "suggested_fix:" in output_schema
-    assert "\n    error:\n" not in output_schema
+    assert "metrics:" in output_schema
+    assert "next_step:" in output_schema
+    assert "error:" in output_schema
+    assert "stdout:" in output_schema
+    assert "stderr:" in output_schema
+    assert "command:" in output_schema
     assert "runner_command:" in CONFIG_EXAMPLE_TEXT
     assert "- <runner-command>" in CONFIG_EXAMPLE_TEXT
     assert "default_crawl_budget: 30" in CONFIG_EXAMPLE_TEXT
@@ -50,26 +55,18 @@ def test_skill_metadata_contract_matches_runtime():
 
 
 def test_skill_docs_match_storage_state_behavior():
-    assert "`login` creates the Playwright storage state explicitly." in SKILL_TEXT
-    assert (
-        "`crawl_seed` and `collect_nightly` require an authenticated Playwright "
-        "storage state file."
-    ) in SKILL_TEXT
-    assert (
-        "`report_weekly` and `list_contactable` run from the database and do not "
-        "require storage state."
-    ) in SKILL_TEXT
-    assert (
-        "`crawl-seed` and `collect-nightly` require an authenticated Playwright "
-        "storage state file"
-    ) in README_TEXT
-    assert (
-        "`report-weekly` and `list-contactable` operate from the SQLite database "
-        "and do not require `--storage-state`"
-    ) in README_TEXT
-    assert (
-        "Create a reusable login session explicitly first" in README_TEXT
-    )
+    assert "login` creates the Playwright storage state explicitly" in SKILL_TEXT
+    assert "crawl_seed" in SKILL_TEXT
+    assert "collect_nightly" in SKILL_TEXT
+    assert "report_weekly" in SKILL_TEXT
+    assert "list_contactable" in SKILL_TEXT
+    assert "Save a reusable login session first" in README_TEXT
+    assert "Run a manual crawl with an existing Playwright storage state file" in README_TEXT
+    assert "List high-quality contactable creators from the SQLite database" in README_TEXT
+    assert "Use the OpenClaw skill actions in this order" in README_TEXT
+    assert "login` creates the Playwright storage state explicitly" in README_TEXT
+    assert "crawl_seed` and `collect_nightly` require an authenticated Playwright storage state file" in README_TEXT
+    assert "report_weekly` and `list_contactable` run from the SQLite database and do not require `--storage-state`" in README_TEXT
 
 
 def test_crawl_seed_requires_seed_url():

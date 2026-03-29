@@ -11,7 +11,7 @@ uv sync
 uv run playwright install chromium
 ```
 
-Create a reusable login session explicitly first:
+Save a reusable login session first:
 
 ```bash
 uv run red-crawler login --save-state "./state.json"
@@ -19,7 +19,7 @@ uv run red-crawler login --save-state "./state.json"
 
 It will open a visible browser. Log in to Xiaohongshu there, then come back to the terminal and press Enter to save the session file.
 
-`crawl-seed` and `collect-nightly` require an authenticated Playwright storage state file:
+Run a manual crawl with an existing Playwright storage state file:
 
 ```bash
 uv run red-crawler crawl-seed \
@@ -45,7 +45,7 @@ uv run red-crawler crawl-seed \
   --include-note-recommendations
 ```
 
-`report-weekly` and `list-contactable` operate from the SQLite database and do not require `--storage-state`:
+List high-quality contactable creators from the SQLite database:
 
 ```bash
 uv run red-crawler list-contactable \
@@ -100,7 +100,11 @@ uv sync
 uv run playwright install chromium
 ```
 
-Create a `state.json` file with the `login` action before running any non-login action such as `crawl_seed`, `collect_nightly`, `report_weekly`, or `list_contactable`.
+Use the OpenClaw skill actions in this order:
+
+- `login` creates the Playwright storage state explicitly.
+- `crawl_seed` and `collect_nightly` require an authenticated Playwright storage state file.
+- `report_weekly` and `list_contactable` run from the SQLite database and do not require `--storage-state`.
 
 ## launchd
 
