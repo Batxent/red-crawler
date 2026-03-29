@@ -118,6 +118,7 @@ def build_failed_account_record(
     source_type: str,
     source_from: Optional[str],
     error: str,
+    discovery_depth: int = 0,
 ) -> AccountRecord:
     return AccountRecord(
         account_id=_extract_account_id("", profile_url),
@@ -129,4 +130,5 @@ def build_failed_account_record(
         source_from=source_from,
         crawl_status="failed",
         crawl_error=error,
+        discovery_depth=discovery_depth,
     )

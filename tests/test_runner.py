@@ -71,6 +71,8 @@ def test_run_crawl_seed_collects_accounts_leads_and_failures():
         "user-002",
         "user-003",
     ]
+    assert result.accounts[1].source_type == "profile_recommendation"
+    assert result.accounts[1].discovery_depth == 1
     assert result.accounts[2].crawl_status == "failed"
     assert result.accounts[0].creator_segment == "general"
     assert result.accounts[0].relevance_score == 1.0
@@ -186,6 +188,8 @@ def test_run_crawl_seed_expands_candidates_from_search_results():
     result = run_crawl_seed_with_client(config, client)
 
     assert [account.account_id for account in result.accounts] == ["user-001", "user-002"]
+    assert result.accounts[1].source_type == "search_result"
+    assert result.accounts[1].discovery_depth == 1
     assert result.accounts[1].creator_segment == "creator"
     assert result.accounts[1].relevance_score >= 0.7
     assert result.run_report.succeeded_accounts == 2
@@ -335,18 +339,28 @@ def test_run_crawl_seed_allows_second_layer_search_expansion():
         "彩妆博主": [""],
         "化妆博主": [""],
     }
-    client = FakeClient(pages=pages, search_pages=search_pages)
-    client.search_pages["护肤博主"] = [
-        """
-        <div class="note-item">
-          <div class="footer">
-            <div class="card-bottom-wrapper">
-              <a class="author" href="/user/profile/user-004?xsec_source=pc_search">U4</a>
-            </div>
-          </div>
-        </div>
-        """
-    ]
+    class SecondLayerClient(FakeClient):
+        def fetch_search_result_htmls(self, query):
+            count = self.search_queries.count(query)
+            self.search_queries.append(query)
+            if query == "护肤博主" and count >= 1:
+                return [
+                    """
+                    <div class="note-item">
+                      <div class="footer">
+                        <div class="card-bottom-wrapper">
+                          <a class="author" href="/user/profile/user-004?xsec_source=pc_search">U4</a>
+                        </div>
+                      </div>
+                    </div>
+                    """
+                ]
+            payload = self.search_pages.get(query, [])
+            if isinstance(payload, str):
+                return [payload]
+            return payload
+
+    client = SecondLayerClient(pages=pages, search_pages=search_pages)
     config = CrawlConfig(
         seed_url="https://www.xiaohongshu.com/user/profile/user-001",
         storage_state="state.json",
@@ -363,6 +377,9 @@ def test_run_crawl_seed_allows_second_layer_search_expansion():
         "user-002",
         "user-004",
     ]
+    assert result.accounts[1].discovery_depth == 1
+    assert result.accounts[2].source_type == "search_result"
+    assert result.accounts[2].discovery_depth == 2
     assert client.search_queries.count("护肤博主") >= 2
 
 

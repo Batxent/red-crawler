@@ -77,6 +77,7 @@ def run_crawl_seed_with_client(
                 source_type=source_type,
                 source_from=source_from,
             )
+            account.discovery_depth = depth
             account.creator_segment = classify_creator_segment(
                 {
                     "nickname": account.nickname,
@@ -104,6 +105,7 @@ def run_crawl_seed_with_client(
                     source_type=source_type,
                     source_from=source_from,
                     error=str(exc),
+                    discovery_depth=depth,
                 )
             )
             errors.append({"profile_url": profile_url, "error": str(exc)})
@@ -116,22 +118,28 @@ def run_crawl_seed_with_client(
         if remaining_slots <= 0:
             continue
 
-        recommendation_candidates = extract_similar_profiles(
-            html=html,
-            base_profile_url=profile_url,
-            max_results=remaining_slots,
-        )
+        recommendation_candidates = [
+            {**candidate, "source_type": "profile_recommendation"}
+            for candidate in extract_similar_profiles(
+                html=html,
+                base_profile_url=profile_url,
+                max_results=remaining_slots,
+            )
+        ]
         if config.include_note_recommendations:
             for note_html in client.fetch_note_recommendation_html(profile_url):
                 extra_slots = config.max_accounts - len(queued_urls)
                 if extra_slots <= 0:
                     break
                 recommendation_candidates.extend(
-                    extract_similar_profiles(
-                        html=note_html,
-                        base_profile_url=profile_url,
-                        max_results=extra_slots,
-                    )
+                    [
+                        {**candidate, "source_type": "note_recommendation"}
+                        for candidate in extract_similar_profiles(
+                            html=note_html,
+                            base_profile_url=profile_url,
+                            max_results=extra_slots,
+                        )
+                    ]
                 )
 
         if not recommendation_candidates:
@@ -197,7 +205,10 @@ def run_crawl_seed_with_client(
             if aborted:
                 break
 
-            recommendation_candidates = filtered_search_candidates
+            recommendation_candidates = [
+                {**candidate, "source_type": "search_result"}
+                for candidate in filtered_search_candidates
+            ]
 
         for candidate in recommendation_candidates:
             candidate_url = candidate["profile_url"]
@@ -208,7 +219,7 @@ def run_crawl_seed_with_client(
                 (
                     candidate_url,
                     depth + 1,
-                    "recommended",
+                    str(candidate.get("source_type", "recommended")),
                     account.account_id,
                 )
             )

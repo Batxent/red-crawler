@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.red-crawler.collect-nightly</string>
+
+  <key>WorkingDirectory</key>
+  <string>__WORKDIR__</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__UV_BIN__</string>
+    <string>run</string>
+    <string>python</string>
+    <string>-m</string>
+    <string>red_crawler.cli</string>
+    <string>collect-nightly</string>
+    <string>--storage-state</string>
+    <string>__STORAGE_STATE__</string>
+    <string>--db-path</string>
+    <string>__DB_PATH__</string>
+    <string>--report-dir</string>
+    <string>__REPORT_DIR__</string>
+    <string>--cache-dir</string>
+    <string>__CACHE_DIR__</string>
+    <string>--crawl-budget</string>
+    <string>30</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>2</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>__LOG_DIR__/collect-nightly.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>__LOG_DIR__/collect-nightly.err.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

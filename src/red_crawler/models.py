@@ -15,6 +15,7 @@ class AccountRecord:
     source_from: Optional[str]
     crawl_status: str
     crawl_error: Optional[str]
+    discovery_depth: int = 0
     creator_segment: str = ""
     relevance_score: float = 0.0
 
