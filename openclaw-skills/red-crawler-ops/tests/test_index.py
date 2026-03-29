@@ -48,7 +48,15 @@ def test_skill_metadata_contract_matches_runtime():
     assert "stderr:" in output_schema
     assert "command:" in output_schema
     assert "runner_command:" in CONFIG_EXAMPLE_TEXT
-    assert "- <runner-command>" in CONFIG_EXAMPLE_TEXT
+    assert "workspace_path: ." in CONFIG_EXAMPLE_TEXT
+    assert "storage_state: ./state.json" in CONFIG_EXAMPLE_TEXT
+    assert "db_path: ./data/red_crawler.db" in CONFIG_EXAMPLE_TEXT
+    assert "report_dir: ./reports" in CONFIG_EXAMPLE_TEXT
+    assert "output_dir: ./output" in CONFIG_EXAMPLE_TEXT
+    assert "cache_dir: ./.cache/red-crawler" in CONFIG_EXAMPLE_TEXT
+    assert "- uv" in CONFIG_EXAMPLE_TEXT
+    assert "- run" in CONFIG_EXAMPLE_TEXT
+    assert "- red-crawler" in CONFIG_EXAMPLE_TEXT
     assert "default_crawl_budget: 30" in CONFIG_EXAMPLE_TEXT
     assert "default_report_days: 7" in CONFIG_EXAMPLE_TEXT
     assert "default_list_limit: 20" in CONFIG_EXAMPLE_TEXT

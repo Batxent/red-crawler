@@ -1,13 +1,13 @@
-workspace_path: <workspace-path>
-storage_state: <storage-state-path>
-db_path: <sqlite-db-path>
-report_dir: <report-dir>
-output_dir: <output-dir>
-cache_dir: <cache-dir>
+workspace_path: .
+storage_state: ./state.json
+db_path: ./data/red_crawler.db
+report_dir: ./reports
+output_dir: ./output
+cache_dir: ./.cache/red-crawler
 runner_command:
-  - <runner-command>
+  - uv
   - run
-  - <crawler-entry>
+  - red-crawler
 default_crawl_budget: 30
 default_report_days: 7
 default_list_limit: 20
