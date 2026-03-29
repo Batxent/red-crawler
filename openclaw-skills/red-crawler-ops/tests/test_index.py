@@ -400,6 +400,42 @@ def test_handler_returns_structured_success_for_report_weekly(tmp_path, monkeypa
     assert result["stderr"] == ""
 
 
+def test_handler_finds_relative_report_artifacts_under_workspace(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+    weekly_report = report_dir / "weekly-growth-report.json"
+    weekly_report.write_text("{}", encoding="utf-8")
+    creators_csv = report_dir / "contactable_creators.csv"
+    creators_csv.write_text("id\n1\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        INDEX_MODULE.subprocess,
+        "run",
+        lambda argv, cwd, capture_output, text: subprocess.CompletedProcess(
+            argv, 0, stdout="ok", stderr=""
+        ),
+    )
+
+    result = run_handler(
+        {
+            "action": "report_weekly",
+            "workspace_path": str(tmp_path),
+            "db_path": "data/red_crawler.db",
+            "report_dir": "reports",
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "success"
+    assert result["artifacts"] == {
+        "weekly-growth-report.json": str(weekly_report),
+        "contactable_creators.csv": str(creators_csv),
+    }
+
+
 def test_handler_maps_non_zero_exit_to_execution_error(tmp_path, monkeypatch):
     (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
 
@@ -427,6 +463,37 @@ def test_handler_maps_non_zero_exit_to_execution_error(tmp_path, monkeypatch):
     assert "exit code 2" in result["message"]
     assert result["stderr"] == "boom"
     assert "Inspect stderr" in result["suggested_fix"]
+
+
+def test_handler_maps_subprocess_start_failure_to_execution_error(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+
+    def fake_run(argv, cwd, capture_output, text):
+        raise FileNotFoundError("uv not found")
+
+    monkeypatch.setattr(INDEX_MODULE.subprocess, "run", fake_run)
+
+    result = run_handler(
+        {
+            "action": "report_weekly",
+            "workspace_path": str(tmp_path),
+            "db_path": str(tmp_path / "data.db"),
+            "report_dir": str(tmp_path / "reports"),
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "error"
+    assert result["error_type"] == "execution_error"
+    assert "failed to start" in result["message"]
+    assert "uv not found" in result["message"]
+    assert result["command"] == (
+        f"uv run red-crawler report-weekly --db-path {tmp_path / 'data.db'} "
+        f"--report-dir {tmp_path / 'reports'}"
+    )
+    assert "runner command is installed" in result["suggested_fix"]
 
 
 def test_handler_returns_artifact_error_for_missing_crawl_seed_outputs(

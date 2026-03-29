@@ -171,11 +171,26 @@ def run_command(argv, cwd):
     return subprocess.run(argv, cwd=cwd, capture_output=True, text=True)
 
 
+def _workspace_root(resolved):
+    return Path(resolved["workspace_path"])
+
+
+def _resolve_artifact_dir(path_value, resolved):
+    base = _workspace_root(resolved)
+    if path_value is None:
+        return base
+
+    path = Path(path_value)
+    if path.is_absolute():
+        return path
+    return base / path
+
+
 def _artifact_root(action, resolved):
     if action == "crawl_seed":
-        return Path(resolved.get("output_dir") or resolved.get("workspace_path"))
+        return _resolve_artifact_dir(resolved.get("output_dir"), resolved)
     if action in {"collect_nightly", "report_weekly"}:
-        return Path(resolved.get("report_dir") or resolved.get("workspace_path"))
+        return _resolve_artifact_dir(resolved.get("report_dir"), resolved)
     return None
 
 
@@ -263,7 +278,22 @@ async def handler(input, context):
     resolved["action"] = normalized_action
     command = build_command(resolved)
     command_display = _display_command(command)
-    completed = run_command(command, cwd=Path(resolved["workspace_path"]))
+    try:
+        completed = run_command(command, cwd=_workspace_root(resolved))
+    except OSError as exc:
+        return {
+            "status": "error",
+            "action": normalized_action,
+            "error_type": "execution_error",
+            "message": f"{normalized_action} failed to start: {exc}.",
+            "command": command_display,
+            "stdout": "",
+            "stderr": "",
+            "suggested_fix": (
+                "Verify the runner command is installed and available from the "
+                "current environment, then rerun the action."
+            ),
+        }
 
     if completed.returncode != 0:
         return {
