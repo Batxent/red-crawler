@@ -56,7 +56,7 @@ class SafeModeController:
         if not self.enabled:
             return
         self.request_count += 1
-        delay = self.rng.uniform(1.5, 3.5)
+        delay = self.rng.uniform(3.0, 9.0)
         self.log_fn(f"safe-mode: sleeping {delay:.1f}s before request #{self.request_count}")
         self.sleep_fn(delay)
         if self.request_count % self.pause_every == 0:
@@ -65,6 +65,30 @@ class SafeModeController:
                 f"safe-mode: taking a longer {pause:.1f}s pause after {self.request_count} requests"
             )
             self.sleep_fn(pause)
+
+    def after_page_load(self, page: Page, *, page_kind: str) -> None:
+        if not self.enabled:
+            return
+        dwell = self.rng.uniform(3.0, 8.5 if page_kind == "search" else 7.0)
+        self.log_fn(f"safe-mode: dwelling {dwell:.1f}s on {page_kind} page")
+        self.sleep_fn(dwell)
+
+        if self.rng.random() < 0.65:
+            scroll_ratio = self.rng.uniform(0.22, 0.78)
+            page.evaluate(f"window.scrollTo(0, document.body.scrollHeight * {scroll_ratio:.2f})")
+            settle = self.rng.uniform(1.0, 2.6)
+            self.log_fn(
+                f"safe-mode: settling for {settle:.1f}s after partial scroll on {page_kind} page"
+            )
+            self.sleep_fn(settle)
+
+            if self.rng.random() < 0.35:
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                deep_settle = self.rng.uniform(1.2, 3.0)
+                self.log_fn(
+                    f"safe-mode: settling for {deep_settle:.1f}s after deep scroll on {page_kind} page"
+                )
+                self.sleep_fn(deep_settle)
 
     def on_risk_event(self, reason: str | None = None) -> None:
         if not self.enabled:
@@ -187,6 +211,7 @@ class PlaywrightCrawlerClient:
                     page.wait_for_load_state("networkidle", timeout=5000)
                 except Exception:
                     pass
+            self.safe_mode_controller.after_page_load(page, page_kind="profile")
             self.safe_mode_controller.on_success()
             return page.content()
         finally:
@@ -202,6 +227,7 @@ class PlaywrightCrawlerClient:
                 raise RuntimeError(f"page request failed with status {response.status}")
             html_snapshots: List[str] = []
             last_length = -1
+            self.safe_mode_controller.after_page_load(page, page_kind="search")
 
             for _ in range(scroll_rounds + 1):
                 try:

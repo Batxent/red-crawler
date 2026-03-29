@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.red-crawler.collect-nightly</string>
+  <string>com.red-crawler.collect-midday</string>
 
   <key>WorkingDirectory</key>
   <string>/Users/tommy/Documents/GitHubOpenSources/red-crawler</string>
@@ -25,22 +25,26 @@
     <string>--cache-dir</string>
     <string>/Users/tommy/Documents/GitHubOpenSources/red-crawler/.cache/red-crawler</string>
     <string>--crawl-budget</string>
+    <string>28</string>
+    <string>--startup-jitter-minutes</string>
     <string>30</string>
+    <string>--slot-name</string>
+    <string>midday</string>
   </array>
 
   <key>StartCalendarInterval</key>
   <dict>
     <key>Hour</key>
-    <integer>2</integer>
+    <integer>13</integer>
     <key>Minute</key>
-    <integer>30</integer>
+    <integer>5</integer>
   </dict>
 
   <key>StandardOutPath</key>
-  <string>/Users/tommy/Documents/GitHubOpenSources/red-crawler/logs/collect-nightly.out.log</string>
+  <string>/Users/tommy/Documents/GitHubOpenSources/red-crawler/logs/collect-midday.out.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/Users/tommy/Documents/GitHubOpenSources/red-crawler/logs/collect-nightly.err.log</string>
+  <string>/Users/tommy/Documents/GitHubOpenSources/red-crawler/logs/collect-midday.err.log</string>
 
   <key>RunAtLoad</key>
   <false/>

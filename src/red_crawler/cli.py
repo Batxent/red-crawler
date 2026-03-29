@@ -48,6 +48,8 @@ def build_parser() -> argparse.ArgumentParser:
     collect_nightly.add_argument("--cache-ttl-days", type=int, default=7)
     collect_nightly.add_argument("--crawl-budget", type=int, default=30)
     collect_nightly.add_argument("--search-term-limit", type=int, default=4)
+    collect_nightly.add_argument("--startup-jitter-minutes", type=int, default=0)
+    collect_nightly.add_argument("--slot-name", default="")
 
     report_weekly = subparsers.add_parser("report-weekly")
     report_weekly.add_argument("--db-path", default="data/red_crawler.db")
@@ -91,6 +93,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             cache_ttl_days=args.cache_ttl_days,
             crawl_budget=args.crawl_budget,
             search_term_limit=args.search_term_limit,
+            startup_jitter_minutes=args.startup_jitter_minutes,
+            slot_name=args.slot_name,
         )
         run_nightly_collection(config)
         return 0

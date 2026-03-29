@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from red_crawler.models import AccountRecord, ContactLead, CrawlResult, RunReport
 from red_crawler.nightly import (
     NightlyCollectConfig,
+    apply_startup_jitter,
     collect_nightly_with_client,
     should_promote_seed,
     write_weekly_reports,
@@ -35,6 +36,11 @@ class FakeNightlyClient:
 
     def fetch_note_recommendation_html(self, profile_url):
         return []
+
+
+class ReverseShuffle:
+    def shuffle(self, values):
+        values[:] = list(reversed(values))
 
 
 def test_should_promote_seed_requires_creator_high_relevance_and_email():
@@ -71,6 +77,33 @@ def test_should_promote_seed_requires_creator_high_relevance_and_email():
     account.relevance_score = 0.61
     assert should_promote_seed(account, [email_lead], min_relevance_score=0.75) is False
     assert should_promote_seed(account, [], min_relevance_score=0.75) is False
+
+
+def test_apply_startup_jitter_sleeps_up_to_configured_minutes():
+    sleeps = []
+    logs = []
+
+    class FixedRandom:
+        def uniform(self, start, end):
+            assert (start, end) == (0, 1800)
+            return 742.0
+
+    delay = apply_startup_jitter(
+        NightlyCollectConfig(
+            storage_state="state.json",
+            db_path="db.sqlite3",
+            report_dir="reports",
+            cache_dir=".cache/red-crawler",
+            startup_jitter_minutes=30,
+        ),
+        sleep_fn=sleeps.append,
+        rng=FixedRandom(),
+        log_fn=logs.append,
+    )
+
+    assert delay == 742.0
+    assert sleeps == [742.0]
+    assert logs == ["nightly: delaying start by 742.0s to randomize the run window"]
 
 
 def test_collect_nightly_bootstraps_promotes_seed_and_writes_daily_report(tmp_path):
@@ -137,6 +170,37 @@ def test_collect_nightly_bootstraps_promotes_seed_and_writes_daily_report(tmp_pa
 
     assert seed_row == ("promoted_seed",)
     assert "抗痘博主" in derived_terms
+    assert len(list(report_dir.glob("daily-run-report-*.json"))) == 1
+
+
+def test_collect_nightly_randomizes_search_term_order(tmp_path):
+    db_path = tmp_path / "red-crawler.db"
+    store = CrawlerStore(db_path)
+    client = FakeNightlyClient(
+        search_pages={
+            "美妆博主": [""],
+            "护肤博主": [""],
+        },
+        pages={},
+    )
+    config = NightlyCollectConfig(
+        storage_state="state.json",
+        db_path=str(db_path),
+        report_dir=str(tmp_path / "reports"),
+        cache_dir=str(tmp_path / "cache"),
+        crawl_budget=1,
+        search_term_limit=2,
+    )
+
+    collect_nightly_with_client(
+        config,
+        client,
+        store=store,
+        now_fn=lambda: datetime(2026, 3, 29, 1, 0, tzinfo=timezone.utc),
+        rng=ReverseShuffle(),
+    )
+
+    assert client.search_queries[:2] == ["护肤博主", "美妆博主"]
 
 
 def test_collect_nightly_stops_after_crawl_budget_and_leaves_pending_queue(tmp_path):
@@ -320,3 +384,30 @@ def test_write_weekly_reports_exports_growth_json_and_contactable_csv(tmp_path):
 
     assert report_payload["new_contactable_creators"] == 1
     assert rows[0]["account_id"] == "user-101"
+
+
+def test_write_daily_report_keeps_latest_and_timestamped_copy(tmp_path):
+    from red_crawler.nightly import NightlyCollectResult, write_daily_report
+
+    report_dir = tmp_path / "reports"
+    result = NightlyCollectResult(
+        run_id=7,
+        generated_at="2026-03-29T09:40:00+00:00",
+        crawl_budget=22,
+        queued_candidates=40,
+        processed_accounts=18,
+        new_contactable_creators=5,
+        new_email_leads=5,
+        promoted_seeds=5,
+        processed_search_terms=["美妆博主"],
+        top_search_terms=[{"term": "美妆博主", "candidate_count": 10, "new_contactable_count": 5}],
+        aborted=False,
+        abort_reason=None,
+        slot_name="morning",
+        startup_delay_seconds=312.0,
+    )
+
+    latest = write_daily_report(result, report_dir)
+
+    assert latest.name == "daily-run-report.json"
+    assert (report_dir / "daily-run-report-20260329T094000Z-morning.json").exists()

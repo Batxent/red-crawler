@@ -189,6 +189,8 @@ def test_cli_collect_nightly_runs_worker(tmp_path, monkeypatch):
         captured["db_path"] = config.db_path
         captured["report_dir"] = config.report_dir
         captured["crawl_budget"] = config.crawl_budget
+        captured["startup_jitter_minutes"] = config.startup_jitter_minutes
+        captured["slot_name"] = config.slot_name
         return object()
 
     monkeypatch.setattr("red_crawler.cli.run_nightly_collection", fake_run_nightly_collection)
@@ -204,6 +206,10 @@ def test_cli_collect_nightly_runs_worker(tmp_path, monkeypatch):
             str(tmp_path / "reports"),
             "--crawl-budget",
             "30",
+            "--startup-jitter-minutes",
+            "25",
+            "--slot-name",
+            "morning",
         ]
     )
 
@@ -213,6 +219,8 @@ def test_cli_collect_nightly_runs_worker(tmp_path, monkeypatch):
         "db_path": str(tmp_path / "red-crawler.db"),
         "report_dir": str(tmp_path / "reports"),
         "crawl_budget": 30,
+        "startup_jitter_minutes": 25,
+        "slot_name": "morning",
     }
 
 

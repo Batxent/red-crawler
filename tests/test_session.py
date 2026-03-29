@@ -66,6 +66,68 @@ def test_safe_mode_controller_adds_jitter_and_backoff():
     ]
 
 
+def test_safe_mode_controller_uses_wider_before_request_sleep_window():
+    recorded_ranges = []
+
+    class RangeRandom:
+        def uniform(self, start, end):
+            recorded_ranges.append((start, end))
+            return 3.4
+
+    controller = SafeModeController(
+        enabled=True,
+        sleep_fn=lambda _seconds: None,
+        log_fn=lambda _message: None,
+        rng=RangeRandom(),
+        pause_every=99,
+    )
+
+    controller.before_request()
+
+    assert recorded_ranges == [(3.0, 9.0)]
+
+
+def test_safe_mode_controller_adds_post_load_dwell_and_scroll():
+    sleeps = []
+    logs = []
+    actions = []
+
+    class FakeRandom:
+        def __init__(self):
+            self.uniform_values = iter([4.2, 0.38, 1.4, 1.9])
+            self.random_values = iter([0.2, 0.3])
+
+        def uniform(self, _start, _end):
+            return next(self.uniform_values)
+
+        def random(self):
+            return next(self.random_values)
+
+    class FakePage:
+        def evaluate(self, script):
+            actions.append(script)
+
+    controller = SafeModeController(
+        enabled=True,
+        sleep_fn=sleeps.append,
+        log_fn=logs.append,
+        rng=FakeRandom(),
+    )
+
+    controller.after_page_load(FakePage(), page_kind="profile")
+
+    assert sleeps == [4.2, 1.4, 1.9]
+    assert actions == [
+        "window.scrollTo(0, document.body.scrollHeight * 0.38)",
+        "window.scrollTo(0, document.body.scrollHeight)",
+    ]
+    assert logs == [
+        "safe-mode: dwelling 4.2s on profile page",
+        "safe-mode: settling for 1.4s after partial scroll on profile page",
+        "safe-mode: settling for 1.9s after deep scroll on profile page",
+    ]
+
+
 def test_safe_mode_controller_triggers_circuit_breaker_after_repeated_risk_events():
     controller = SafeModeController(enabled=True, sleep_fn=lambda _seconds: None, risk_threshold=2)
 

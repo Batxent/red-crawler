@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import csv
 import json
+import random
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -91,6 +93,8 @@ class NightlyCollectConfig:
     refresh_after_days: int = 14
     min_relevance_score: float = 0.7
     promotion_threshold: float = 0.75
+    startup_jitter_minutes: int = 0
+    slot_name: str = ""
 
 
 @dataclass
@@ -107,6 +111,8 @@ class NightlyCollectResult:
     top_search_terms: list[dict[str, int | str]]
     aborted: bool
     abort_reason: str | None
+    slot_name: str = ""
+    startup_delay_seconds: float = 0.0
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -115,12 +121,32 @@ class NightlyCollectResult:
 def write_daily_report(result: NightlyCollectResult, report_dir: str | Path) -> Path:
     output_dir = Path(report_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = output_dir / "daily-run-report.json"
-    report_path.write_text(
-        json.dumps(result.to_dict(), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return report_path
+    payload = json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
+    latest_path = output_dir / "daily-run-report.json"
+    latest_path.write_text(payload, encoding="utf-8")
+
+    generated = datetime.fromisoformat(result.generated_at)
+    timestamp = generated.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    slot_suffix = f"-{result.slot_name}" if result.slot_name else ""
+    snapshot_path = output_dir / f"daily-run-report-{timestamp}{slot_suffix}.json"
+    snapshot_path.write_text(payload, encoding="utf-8")
+    return latest_path
+
+
+def apply_startup_jitter(
+    config: NightlyCollectConfig,
+    *,
+    sleep_fn: Callable[[float], None],
+    rng: random.Random | object,
+    log_fn: Callable[[str], None],
+) -> float:
+    if config.startup_jitter_minutes <= 0:
+        return 0.0
+    max_delay_seconds = max(config.startup_jitter_minutes, 0) * 60
+    delay = float(rng.uniform(0, max_delay_seconds))
+    log_fn(f"nightly: delaying start by {delay:.1f}s to randomize the run window")
+    sleep_fn(delay)
+    return delay
 
 
 def write_weekly_reports(
@@ -171,9 +197,11 @@ def collect_nightly_with_client(
     *,
     store: CrawlerStore | None = None,
     now_fn: Callable[[], datetime] | None = None,
+    rng: random.Random | object | None = None,
 ) -> NightlyCollectResult:
     store = store or CrawlerStore(config.db_path)
     now_fn = now_fn or (lambda: datetime.now(timezone.utc))
+    rng = rng or random.Random()
     started_at = _ensure_utc(now_fn())
     store.seed_default_search_terms(now=started_at)
 
@@ -196,6 +224,8 @@ def collect_nightly_with_client(
         limit=config.search_term_limit,
         now=started_at,
     )
+    if processed_search_terms:
+        rng.shuffle(processed_search_terms)
     term_metrics = {
         term: {"candidate_count": 0, "new_contactable_count": 0}
         for term in processed_search_terms
@@ -381,12 +411,20 @@ def collect_nightly_with_client(
         top_search_terms=top_search_terms,
         aborted=aborted,
         abort_reason=abort_reason,
+        slot_name=config.slot_name,
     )
     write_daily_report(result, config.report_dir)
     return result
 
 
 def run_nightly_collection(config: NightlyCollectConfig) -> NightlyCollectResult:
+    jitter_rng = random.Random()
+    startup_delay = apply_startup_jitter(
+        config,
+        sleep_fn=time.sleep,
+        rng=jitter_rng,
+        log_fn=print,
+    )
     store = CrawlerStore(config.db_path)
     with BrowserSession(config.storage_state) as session:
         client = PlaywrightCrawlerClient(
@@ -395,4 +433,7 @@ def run_nightly_collection(config: NightlyCollectConfig) -> NightlyCollectResult
             cache_dir=config.cache_dir,
             cache_ttl_days=config.cache_ttl_days,
         )
-        return collect_nightly_with_client(config, client, store=store)
+        result = collect_nightly_with_client(config, client, store=store)
+        result.startup_delay_seconds = startup_delay
+        write_daily_report(result, config.report_dir)
+        return result

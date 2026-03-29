@@ -1,4 +1,9 @@
 .venv/
 __pycache__/
 .pytest_cache/
+.cache/
 output/
+reports/
+logs/
+state.json
+data/*.db
