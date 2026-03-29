@@ -22,7 +22,7 @@ dev = [
 red-crawler = "red_crawler.cli:main"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "openclaw-skills"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/red_crawler"]
