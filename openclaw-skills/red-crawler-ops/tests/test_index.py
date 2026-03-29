@@ -30,6 +30,7 @@ def test_skill_metadata_contract_matches_runtime():
     output_schema = MANIFEST_TEXT.split("output_schema:", 1)[1]
     assert "runtime: python" in MANIFEST_TEXT
     assert "entry: src/index.py" in MANIFEST_TEXT
+    assert "- bootstrap" in MANIFEST_TEXT
     assert "default_crawl_budget:" in MANIFEST_TEXT
     assert "default_report_days:" in MANIFEST_TEXT
     assert "default_list_limit:" in MANIFEST_TEXT
@@ -63,6 +64,7 @@ def test_skill_metadata_contract_matches_runtime():
 
 
 def test_skill_docs_match_storage_state_behavior():
+    assert "bootstrap" in SKILL_TEXT
     assert "login` creates the Playwright storage state explicitly" in SKILL_TEXT
     assert "crawl_seed" in SKILL_TEXT
     assert "collect_nightly" in SKILL_TEXT
@@ -77,9 +79,147 @@ def test_skill_docs_match_storage_state_behavior():
     assert "Run a manual crawl with an existing Playwright storage state file" in README_TEXT
     assert "List high-quality contactable creators from the SQLite database" in README_TEXT
     assert "Use the OpenClaw skill actions in this order" in README_TEXT
+    assert "bootstrap" in README_TEXT
     assert "login` creates the Playwright storage state explicitly" in README_TEXT
     assert "crawl_seed` and `collect_nightly` require an authenticated Playwright storage state file" in README_TEXT
     assert "report_weekly` and `list_contactable` run from the SQLite database and do not require `--storage-state`" in README_TEXT
+
+
+def test_bootstrap_runs_sync_install_and_login_until_state_exists(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    state_path = tmp_path / "state.json"
+    commands = []
+
+    def fake_run(argv, cwd, capture_output, text):
+        commands.append(argv)
+        if argv == ["uv", "run", "red-crawler", "login", "--save-state", str(state_path)]:
+            state_path.write_text("{}", encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(INDEX_MODULE.subprocess, "run", fake_run)
+
+    result = run_handler(
+        {
+            "action": "bootstrap",
+            "workspace_path": str(tmp_path),
+            "storage_state": str(state_path),
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "success"
+    assert result["action"] == "bootstrap"
+    assert result["artifacts"] == {"state.json": str(state_path)}
+    assert result["metrics"] == {
+        "uv_sync_ran": True,
+        "playwright_install_ran": True,
+        "login_ran": True,
+        "state_file_created": True,
+    }
+    assert result["next_step"] == "You can now run crawl_seed or collect_nightly."
+    assert commands == [
+        ["uv", "sync"],
+        ["uv", "run", "playwright", "install", "chromium"],
+        ["uv", "run", "red-crawler", "login", "--save-state", str(state_path)],
+    ]
+
+
+def test_bootstrap_skips_login_when_state_already_exists(tmp_path, monkeypatch):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    commands = []
+
+    def fake_run(argv, cwd, capture_output, text):
+        commands.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(INDEX_MODULE.subprocess, "run", fake_run)
+
+    result = run_handler(
+        {
+            "action": "bootstrap",
+            "workspace_path": str(tmp_path),
+            "storage_state": str(state_path),
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "success"
+    assert result["metrics"] == {
+        "uv_sync_ran": True,
+        "playwright_install_ran": True,
+        "login_ran": False,
+        "state_file_created": True,
+    }
+    assert commands == [
+        ["uv", "sync"],
+        ["uv", "run", "playwright", "install", "chromium"],
+    ]
+
+
+def test_bootstrap_force_login_even_if_state_exists(tmp_path, monkeypatch):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    commands = []
+
+    def fake_run(argv, cwd, capture_output, text):
+        commands.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(INDEX_MODULE.subprocess, "run", fake_run)
+
+    result = run_handler(
+        {
+            "action": "bootstrap",
+            "workspace_path": str(tmp_path),
+            "storage_state": str(state_path),
+            "force_login": True,
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "success"
+    assert result["metrics"]["login_ran"] is True
+    assert commands[-1] == [
+        "uv",
+        "run",
+        "red-crawler",
+        "login",
+        "--save-state",
+        str(state_path),
+    ]
+
+
+def test_bootstrap_returns_artifact_error_when_login_does_not_create_state(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    state_path = tmp_path / "state.json"
+
+    monkeypatch.setattr(
+        INDEX_MODULE.subprocess,
+        "run",
+        lambda argv, cwd, capture_output, text: subprocess.CompletedProcess(
+            argv, 0, stdout="ok", stderr=""
+        ),
+    )
+
+    result = run_handler(
+        {
+            "action": "bootstrap",
+            "workspace_path": str(tmp_path),
+            "storage_state": str(state_path),
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "error"
+    assert result["error_type"] == "artifact_error"
+    assert "state.json" in result["message"]
 
 
 def test_crawl_seed_requires_seed_url():

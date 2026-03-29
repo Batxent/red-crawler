@@ -6,6 +6,7 @@ Use this skill when you need to operate the `red-crawler` CLI from an OpenClaw w
 
 Use `red-crawler-ops` for:
 
+- bootstrapping a fresh workspace into a ready-to-run state
 - saving a login session into Playwright storage state
 - crawling a seed Xiaohongshu profile
 - running nightly collection against a workspace database
@@ -14,6 +15,7 @@ Use `red-crawler-ops` for:
 
 ## Supported Actions
 
+- `bootstrap`
 - `login`
 - `crawl_seed`
 - `collect_nightly`
@@ -22,6 +24,7 @@ Use `red-crawler-ops` for:
 
 ## Example Prompts
 
+- "Bootstrap this workspace: run setup, install Chromium, and finish when `state.json` has been created."
 - "Run `login` for this workspace and save the browser session to `state.json`."
 - "Crawl this seed profile with a depth of 2 and write outputs into `output/`."
 - "Run the nightly collector against the workspace database and report directory."
@@ -62,6 +65,9 @@ Provide an object with `action` plus optional fields used by the selected action
 
 Action-specific fields include:
 
+- `force_login`
+- `sync_dependencies`
+- `install_browser`
 - `seed_url`
 - `login_url`
 - `max_accounts`
@@ -89,6 +95,8 @@ Successful runs return:
 - `command`
 - `summary`
 - `artifacts`
+- `metrics`
+- `next_step`
 - `stdout`
 - `stderr`
 

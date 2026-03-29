@@ -7,6 +7,7 @@ from collections.abc import Sequence
 
 
 KNOWN_ACTIONS = {
+    "bootstrap",
     "login",
     "crawl_seed",
     "collect_nightly",
@@ -169,6 +170,8 @@ def build_list_contactable_command(resolved):
 
 def build_command(resolved):
     action = str(resolved.get("action", "")).strip().lower()
+    if action == "bootstrap":
+        raise ValueError("bootstrap uses multi-step execution")
     if action == "login":
         return build_login_command(resolved)
     if action == "crawl_seed":
@@ -190,6 +193,14 @@ def _workspace_root(resolved):
     return Path(resolved["workspace_path"])
 
 
+def _resolve_workspace_path_value(path_value, resolved):
+    base = _workspace_root(resolved)
+    path = Path(path_value)
+    if path.is_absolute():
+        return path
+    return base / path
+
+
 def _resolve_artifact_dir(path_value, resolved):
     base = _workspace_root(resolved)
     if path_value is None:
@@ -198,10 +209,7 @@ def _resolve_artifact_dir(path_value, resolved):
             return base
         return base / default_dir
 
-    path = Path(path_value)
-    if path.is_absolute():
-        return path
-    return base / path
+    return _resolve_workspace_path_value(path_value, resolved)
 
 
 def _artifact_root(action, resolved):
@@ -255,7 +263,7 @@ def validate_request(resolved):
             "Provide workspace_path directly or set it in context.config.",
         )
 
-    if action in {"login", "crawl_seed", "collect_nightly"} and not resolved.get(
+    if action in {"bootstrap", "login", "crawl_seed", "collect_nightly"} and not resolved.get(
         "storage_state"
     ):
         return structured_error(
@@ -283,6 +291,98 @@ def validate_request(resolved):
     return {"status": "ok", "action": action, "resolved": resolved}
 
 
+def _bootstrap_commands(resolved):
+    commands = []
+    if resolved.get("sync_dependencies", True):
+        commands.append(["uv", "sync"])
+    if resolved.get("install_browser", True):
+        commands.append(["uv", "run", "playwright", "install", "chromium"])
+
+    state_path = _resolve_workspace_path_value(resolved["storage_state"], resolved)
+    if resolved.get("force_login", False) or not state_path.exists():
+        commands.append(build_login_command(resolved))
+
+    return commands, state_path
+
+
+def _bootstrap_result(resolved):
+    commands, state_path = _bootstrap_commands(resolved)
+    command_displays = []
+
+    for command in commands:
+        command_display = _display_command(command)
+        command_displays.append(command_display)
+        try:
+            completed = run_command(command, cwd=_workspace_root(resolved))
+        except OSError as exc:
+            return {
+                "status": "error",
+                "action": "bootstrap",
+                "error_type": "execution_error",
+                "message": f"bootstrap failed to start: {exc}.",
+                "command": command_display,
+                "stdout": "",
+                "stderr": "",
+                "suggested_fix": (
+                    "Verify the required bootstrap command is installed and "
+                    "available in the current environment, then rerun bootstrap."
+                ),
+            }
+
+        if completed.returncode != 0:
+            return {
+                "status": "error",
+                "action": "bootstrap",
+                "error_type": "execution_error",
+                "message": (
+                    f"bootstrap step failed with exit code {completed.returncode}."
+                ),
+                "command": command_display,
+                "stdout": completed.stdout,
+                "stderr": completed.stderr,
+                "suggested_fix": (
+                    "Inspect stderr, fix the failing bootstrap step, and rerun "
+                    "bootstrap."
+                ),
+            }
+
+    if not state_path.exists():
+        return {
+            "status": "error",
+            "action": "bootstrap",
+            "error_type": "artifact_error",
+            "message": (
+                f"bootstrap completed but missing required artifact: {state_path.name}."
+            ),
+            "command": " && ".join(command_displays),
+            "stdout": "",
+            "stderr": "",
+            "suggested_fix": (
+                "Complete the interactive login flow and ensure the storage_state "
+                "file is written before rerunning bootstrap."
+            ),
+        }
+
+    login_command = build_login_command(resolved)
+    metrics = {
+        "uv_sync_ran": resolved.get("sync_dependencies", True),
+        "playwright_install_ran": resolved.get("install_browser", True),
+        "login_ran": login_command in commands,
+        "state_file_created": state_path.exists(),
+    }
+    return {
+        "status": "success",
+        "action": "bootstrap",
+        "command": " && ".join(command_displays),
+        "artifacts": {state_path.name: str(state_path)},
+        "metrics": metrics,
+        "next_step": "You can now run crawl_seed or collect_nightly.",
+        "summary": "bootstrap completed successfully.",
+        "stdout": "",
+        "stderr": "",
+    }
+
+
 async def handler(input, context):
     resolved = merge_config(input, context or {})
     if isinstance(resolved, dict) and resolved.get("status") == "error":
@@ -294,6 +394,8 @@ async def handler(input, context):
     normalized_action = validation["action"]
     resolved = dict(validation["resolved"])
     resolved["action"] = normalized_action
+    if normalized_action == "bootstrap":
+        return _bootstrap_result(resolved)
     command = build_command(resolved)
     command_display = _display_command(command)
     try:

@@ -52,6 +52,7 @@ input_schema:
     action:
       type: string
       enum:
+        - bootstrap
         - login
         - crawl_seed
         - collect_nightly
@@ -71,6 +72,12 @@ input_schema:
       type: string
     login_url:
       type: string
+    force_login:
+      type: boolean
+    sync_dependencies:
+      type: boolean
+    install_browser:
+      type: boolean
     output_dir:
       type: string
     db_path:

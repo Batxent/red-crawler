@@ -102,6 +102,7 @@ uv run playwright install chromium
 
 Use the OpenClaw skill actions in this order:
 
+- `bootstrap` can initialize the workspace, install Chromium, and keep going until `state.json` exists.
 - `login` creates the Playwright storage state explicitly.
 - `crawl_seed` and `collect_nightly` require an authenticated Playwright storage state file.
 - `report_weekly` and `list_contactable` run from the SQLite database and do not require `--storage-state`.
