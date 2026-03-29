@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import subprocess
 from pathlib import Path
 
 INDEX_PATH = Path(__file__).resolve().parents[1] / "src" / "index.py"
@@ -61,14 +62,25 @@ def test_login_requires_storage_state(tmp_path):
     assert "storage_state" in result["message"]
 
 
-def test_report_weekly_does_not_require_storage_state(tmp_path):
+def test_report_weekly_does_not_require_storage_state(tmp_path, monkeypatch):
     (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+    (report_dir / "weekly-growth-report.json").write_text("{}", encoding="utf-8")
+    (report_dir / "contactable_creators.csv").write_text("id\n1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        INDEX_MODULE.subprocess,
+        "run",
+        lambda argv, cwd, capture_output, text: subprocess.CompletedProcess(
+            argv, 0, stdout="", stderr=""
+        ),
+    )
     result = run_handler(
         {
             "action": "report_weekly",
             "workspace_path": str(tmp_path),
             "db_path": str(tmp_path / "data.db"),
-            "report_dir": str(tmp_path / "reports"),
+            "report_dir": str(report_dir),
         },
         {"config": {}},
     )
@@ -76,8 +88,15 @@ def test_report_weekly_does_not_require_storage_state(tmp_path):
     assert result["action"] == "report_weekly"
 
 
-def test_list_contactable_does_not_require_storage_state(tmp_path):
+def test_list_contactable_does_not_require_storage_state(tmp_path, monkeypatch):
     (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        INDEX_MODULE.subprocess,
+        "run",
+        lambda argv, cwd, capture_output, text: subprocess.CompletedProcess(
+            argv, 0, stdout="", stderr=""
+        ),
+    )
     result = run_handler(
         {
             "action": "list_contactable",
@@ -90,15 +109,22 @@ def test_list_contactable_does_not_require_storage_state(tmp_path):
     assert result["action"] == "list_contactable"
 
 
-def test_workspace_path_can_come_from_context_config(tmp_path):
+def test_workspace_path_can_come_from_context_config(tmp_path, monkeypatch):
     (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        INDEX_MODULE.subprocess,
+        "run",
+        lambda argv, cwd, capture_output, text: subprocess.CompletedProcess(
+            argv, 0, stdout="", stderr=""
+        ),
+    )
     result = run_handler(
         {"action": "LOGIN", "storage_state": str(tmp_path / "state.json")},
         {"config": {"workspace_path": str(tmp_path)}},
     )
     assert result["status"] == "success"
     assert result["action"] == "login"
-    assert result["resolved"]["action"] == "login"
+    assert result["command"] == f"uv run red-crawler login --save-state {tmp_path / 'state.json'}"
 
 
 def test_handler_rejects_non_mapping_input(tmp_path):
@@ -317,3 +343,123 @@ def test_build_list_contactable_command_uses_defaults_and_overrides(tmp_path):
         "--format",
         "csv",
     ]
+
+
+def test_handler_returns_structured_success_for_report_weekly(tmp_path, monkeypatch):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+    weekly_report = report_dir / "weekly-growth-report.json"
+    weekly_report.write_text("{}", encoding="utf-8")
+    creators_csv = report_dir / "contactable_creators.csv"
+    creators_csv.write_text("id\n1\n", encoding="utf-8")
+
+    def fake_run(argv, cwd, capture_output, text):
+        assert argv == [
+            "uv",
+            "run",
+            "red-crawler",
+            "report-weekly",
+            "--db-path",
+            str(tmp_path / "data.db"),
+            "--report-dir",
+            str(report_dir),
+            "--days",
+            "7",
+        ]
+        assert cwd == tmp_path
+        assert capture_output is True
+        assert text is True
+        return subprocess.CompletedProcess(argv, 0, stdout="weekly report ready", stderr="")
+
+    monkeypatch.setattr(INDEX_MODULE.subprocess, "run", fake_run)
+
+    result = run_handler(
+        {
+            "action": "report_weekly",
+            "workspace_path": str(tmp_path),
+            "db_path": str(tmp_path / "data.db"),
+            "report_dir": str(report_dir),
+            "days": 7,
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "success"
+    assert result["action"] == "report_weekly"
+    assert result["command"] == (
+        f"uv run red-crawler report-weekly --db-path {tmp_path / 'data.db'} "
+        f"--report-dir {report_dir} --days 7"
+    )
+    assert result["summary"] == "report_weekly completed successfully."
+    assert result["artifacts"] == {
+        "weekly-growth-report.json": str(weekly_report),
+        "contactable_creators.csv": str(creators_csv),
+    }
+    assert result["stdout"] == "weekly report ready"
+    assert result["stderr"] == ""
+
+
+def test_handler_maps_non_zero_exit_to_execution_error(tmp_path, monkeypatch):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+
+    def fake_run(argv, cwd, capture_output, text):
+        return subprocess.CompletedProcess(argv, 2, stdout="", stderr="boom")
+
+    monkeypatch.setattr(INDEX_MODULE.subprocess, "run", fake_run)
+
+    result = run_handler(
+        {
+            "action": "report_weekly",
+            "workspace_path": str(tmp_path),
+            "db_path": str(tmp_path / "data.db"),
+            "report_dir": str(tmp_path / "reports"),
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "error"
+    assert result["error_type"] == "execution_error"
+    assert result["command"] == (
+        f"uv run red-crawler report-weekly --db-path {tmp_path / 'data.db'} "
+        f"--report-dir {tmp_path / 'reports'}"
+    )
+    assert "exit code 2" in result["message"]
+    assert result["stderr"] == "boom"
+    assert "Inspect stderr" in result["suggested_fix"]
+
+
+def test_handler_returns_artifact_error_for_missing_crawl_seed_outputs(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "accounts.csv").write_text("id\n1\n", encoding="utf-8")
+
+    def fake_run(argv, cwd, capture_output, text):
+        return subprocess.CompletedProcess(argv, 0, stdout="done", stderr="")
+
+    monkeypatch.setattr(INDEX_MODULE.subprocess, "run", fake_run)
+
+    result = run_handler(
+        {
+            "action": "crawl_seed",
+            "workspace_path": str(tmp_path),
+            "storage_state": str(tmp_path / "state.json"),
+            "seed_url": "https://www.xiaohongshu.com/user/profile/user-001",
+            "output_dir": str(output_dir),
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "error"
+    assert result["error_type"] == "artifact_error"
+    assert "contact_leads.csv" in result["message"]
+    assert "run_report.json" in result["message"]
+    assert result["command"] == (
+        "uv run red-crawler crawl-seed --seed-url "
+        "https://www.xiaohongshu.com/user/profile/user-001 "
+        f"--storage-state {tmp_path / 'state.json'} --output-dir {output_dir}"
+    )
+    assert "Verify the CLI completed" in result["suggested_fix"]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shlex
+import subprocess
 from pathlib import Path
 from collections.abc import Sequence
 
@@ -11,6 +12,19 @@ KNOWN_ACTIONS = {
     "collect_nightly",
     "report_weekly",
     "list_contactable",
+}
+
+EXPECTED_ARTIFACTS = {
+    "crawl_seed": ("accounts.csv", "contact_leads.csv", "run_report.json"),
+    "collect_nightly": (
+        "daily-run-report.json",
+        "weekly-growth-report.json",
+        "contactable_creators.csv",
+    ),
+    "report_weekly": (
+        "weekly-growth-report.json",
+        "contactable_creators.csv",
+    ),
 }
 
 
@@ -43,6 +57,10 @@ def structured_error(error_type, message, suggested_fix):
         "message": message,
         "suggested_fix": suggested_fix,
     }
+
+
+def _display_command(argv):
+    return shlex.join(str(part) for part in argv)
 
 
 def _get_runner_command(resolved):
@@ -149,6 +167,37 @@ def build_command(resolved):
     raise ValueError(f"Unsupported action: {resolved.get('action')}")
 
 
+def run_command(argv, cwd):
+    return subprocess.run(argv, cwd=cwd, capture_output=True, text=True)
+
+
+def _artifact_root(action, resolved):
+    if action == "crawl_seed":
+        return Path(resolved.get("output_dir") or resolved.get("workspace_path"))
+    if action in {"collect_nightly", "report_weekly"}:
+        return Path(resolved.get("report_dir") or resolved.get("workspace_path"))
+    return None
+
+
+def _collect_artifacts(action, resolved):
+    expected = EXPECTED_ARTIFACTS.get(action, ())
+    if not expected:
+        return {}, []
+
+    root = _artifact_root(action, resolved)
+    artifacts = {}
+    missing = []
+
+    for name in expected:
+        artifact_path = root / name
+        if artifact_path.exists():
+            artifacts[name] = str(artifact_path)
+        else:
+            missing.append(name)
+
+    return artifacts, missing
+
+
 def validate_request(resolved):
     action = str(resolved.get("action", "")).strip().lower()
     if action not in KNOWN_ACTIONS:
@@ -212,10 +261,52 @@ async def handler(input, context):
     normalized_action = validation["action"]
     resolved = dict(validation["resolved"])
     resolved["action"] = normalized_action
+    command = build_command(resolved)
+    command_display = _display_command(command)
+    completed = run_command(command, cwd=Path(resolved["workspace_path"]))
+
+    if completed.returncode != 0:
+        return {
+            "status": "error",
+            "action": normalized_action,
+            "error_type": "execution_error",
+            "message": (
+                f"{normalized_action} failed with exit code {completed.returncode}."
+            ),
+            "command": command_display,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+            "suggested_fix": (
+                "Inspect stderr, verify the red-crawler CLI arguments, and rerun "
+                "after fixing the underlying issue."
+            ),
+        }
+
+    artifacts, missing_artifacts = _collect_artifacts(normalized_action, resolved)
+    if missing_artifacts:
+        return {
+            "status": "error",
+            "action": normalized_action,
+            "error_type": "artifact_error",
+            "message": (
+                f"{normalized_action} completed but missing required artifacts: "
+                f"{', '.join(missing_artifacts)}."
+            ),
+            "command": command_display,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+            "suggested_fix": (
+                "Verify the CLI completed in the expected output directory and "
+                "check whether the underlying command wrote all required files."
+            ),
+        }
 
     return {
         "status": "success",
         "action": normalized_action,
-        "error_type": None,
-        "resolved": resolved,
+        "command": command_display,
+        "artifacts": artifacts,
+        "summary": f"{normalized_action} completed successfully.",
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
     }
