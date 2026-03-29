@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import sys
+import importlib.util
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from index import handler
+INDEX_PATH = Path(__file__).resolve().parents[1] / "src" / "index.py"
+INDEX_SPEC = importlib.util.spec_from_file_location("red_crawler_ops_index", INDEX_PATH)
+assert INDEX_SPEC is not None
+assert INDEX_SPEC.loader is not None
+INDEX_MODULE = importlib.util.module_from_spec(INDEX_SPEC)
+INDEX_SPEC.loader.exec_module(INDEX_MODULE)
+handler = INDEX_MODULE.handler
 
 
 def run_handler(input_data, context):
