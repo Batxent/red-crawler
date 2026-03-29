@@ -68,3 +68,13 @@ def test_workspace_path_must_contain_pyproject(tmp_path):
     assert result["status"] == "error"
     assert result["error_type"] == "configuration_error"
     assert "pyproject.toml" in result["message"]
+
+
+def test_workspace_path_rejects_non_path_like_value():
+    result = run_handler(
+        {"action": "login", "workspace_path": 123, "storage_state": "/tmp/state.json"},
+        {"config": {}},
+    )
+    assert result["status"] == "error"
+    assert result["error_type"] == "configuration_error"
+    assert "path-like" in result["message"]

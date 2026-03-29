@@ -74,7 +74,14 @@ def validate_request(resolved):
             "Run login first or provide a storage_state path.",
         )
 
-    workspace = Path(workspace_path)
+    try:
+        workspace = Path(workspace_path)
+    except (TypeError, ValueError):
+        return structured_error(
+            "configuration_error",
+            "workspace_path must be a path-like value.",
+            "Provide workspace_path as a string or Path to the red-crawler repository root.",
+        )
     pyproject = workspace / "pyproject.toml"
     if not pyproject.exists():
         return structured_error(
