@@ -20,6 +20,12 @@ def extract_config(context):
 
 
 def merge_config(input_data, context):
+    if not isinstance(input_data, dict):
+        return structured_error(
+            "validation_error",
+            "input must be a mapping.",
+            "Pass a JSON object with action and parameters.",
+        )
     config = extract_config(context)
     merged = dict(config)
     for key, value in input_data.items():
@@ -81,14 +87,20 @@ def validate_request(resolved):
 
 
 async def handler(input, context):
-    resolved = merge_config(input or {}, context or {})
+    resolved = merge_config(input, context or {})
+    if isinstance(resolved, dict) and resolved.get("status") == "error":
+        return resolved
     validation = validate_request(resolved)
     if validation["status"] == "error":
         return validation
 
+    normalized_action = validation["action"]
+    resolved = dict(validation["resolved"])
+    resolved["action"] = normalized_action
+
     return {
         "status": "success",
-        "action": validation["action"],
+        "action": normalized_action,
         "error_type": None,
-        "resolved": validation["resolved"],
+        "resolved": resolved,
     }

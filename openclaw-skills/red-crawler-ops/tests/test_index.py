@@ -37,11 +37,23 @@ def test_collect_nightly_requires_storage_state():
 def test_workspace_path_can_come_from_context_config(tmp_path):
     (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
     result = run_handler(
-        {"action": "login", "storage_state": str(tmp_path / "state.json")},
+        {"action": "LOGIN", "storage_state": str(tmp_path / "state.json")},
         {"config": {"workspace_path": str(tmp_path)}},
     )
-    assert result["status"] != "error"
-    assert result.get("error_type") != "configuration_error"
+    assert result["status"] == "success"
+    assert result["action"] == "login"
+    assert result["resolved"]["action"] == "login"
+
+
+def test_handler_rejects_non_mapping_input(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    result = run_handler(
+        "bad-input",
+        {"config": {"workspace_path": str(tmp_path)}},
+    )
+    assert result["status"] == "error"
+    assert result["error_type"] == "validation_error"
+    assert "mapping" in result["message"]
 
 
 def test_workspace_path_must_contain_pyproject(tmp_path):
