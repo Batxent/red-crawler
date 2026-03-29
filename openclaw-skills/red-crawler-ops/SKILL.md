@@ -6,6 +6,7 @@ Use this skill when you need to operate the `red-crawler` CLI from an OpenClaw w
 
 Use `red-crawler-ops` for:
 
+- installing or cloning a fresh `red-crawler` workspace
 - bootstrapping a fresh workspace into a ready-to-run state
 - saving a login session into Playwright storage state
 - crawling a seed Xiaohongshu profile
@@ -15,6 +16,7 @@ Use `red-crawler-ops` for:
 
 ## Supported Actions
 
+- `install_or_bootstrap`
 - `bootstrap`
 - `login`
 - `crawl_seed`
@@ -24,6 +26,7 @@ Use `red-crawler-ops` for:
 
 ## Example Prompts
 
+- "Install `red-crawler` here if needed, then bootstrap it until `state.json` exists."
 - "Bootstrap this workspace: run setup, install Chromium, and finish when `state.json` has been created."
 - "Run `login` for this workspace and save the browser session to `state.json`."
 - "Crawl this seed profile with a depth of 2 and write outputs into `output/`."
@@ -33,9 +36,10 @@ Use `red-crawler-ops` for:
 
 ## Prerequisites
 
-- The workspace must be the `red-crawler` repository root.
-- `uv sync` must be run in the workspace before the first action.
-- Chromium must be installed with `uv run playwright install chromium`.
+- `install_or_bootstrap` can clone the repository before setup when a workspace does not exist yet.
+- `bootstrap` and every operational action require the workspace to be the `red-crawler` repository root.
+- `git` must be available when `install_or_bootstrap` needs to clone the repository.
+- `uv` must be available for `bootstrap`, `install_or_bootstrap`, and every CLI action.
 - `login` creates the Playwright storage state explicitly.
 - `crawl_seed` and `collect_nightly` require an authenticated Playwright storage state file.
 - `report_weekly` and `list_contactable` run from the database and do not require storage state.
@@ -43,9 +47,9 @@ Use `red-crawler-ops` for:
 
 ## Safety Limits
 
-- Do not run this skill outside a local `red-crawler` workspace.
-- Do not install dependencies; `uv sync` and Playwright setup are required beforehand.
-- Do not create login sessions silently; use the explicit `login` action so the user can complete authentication.
+- Do not overwrite an existing non-`red-crawler` directory during installation.
+- Do not point this skill at a directory that lacks `pyproject.toml` unless you intend `install_or_bootstrap` to clone a fresh workspace there.
+- Do not create login sessions silently; `bootstrap` or `install_or_bootstrap` still require the user to complete interactive authentication.
 - Do not point it at production data or unknown databases.
 - Do not assume a browser session exists; create `state.json` with `login` first.
 - Do not hard-code machine-specific paths in prompts or config.
@@ -56,6 +60,10 @@ Use `red-crawler-ops` for:
 Provide an object with `action` plus optional fields used by the selected action. Common fields include:
 
 - `workspace_path`
+- `repo_url`
+- `workspace_parent`
+- `workspace_name`
+- `branch`
 - `runner_command`
 - `storage_state`
 - `db_path`

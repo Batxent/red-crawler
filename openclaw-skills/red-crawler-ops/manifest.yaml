@@ -8,6 +8,18 @@ config:
     type: string
     default: .
     description: Path to the red-crawler repository root.
+  repo_url:
+    type: string
+    default: https://github.com/Batxent/red-crawler.git
+    description: Clone URL used when install_or_bootstrap needs to create a workspace.
+  workspace_parent:
+    type: string
+    default: .
+    description: Parent directory used to create a new red-crawler workspace.
+  workspace_name:
+    type: string
+    default: red-crawler
+    description: Directory name used when install_or_bootstrap creates a workspace.
   storage_state:
     type: string
     default: ./state.json
@@ -52,6 +64,7 @@ input_schema:
     action:
       type: string
       enum:
+        - install_or_bootstrap
         - bootstrap
         - login
         - crawl_seed
@@ -59,6 +72,14 @@ input_schema:
         - report_weekly
         - list_contactable
     workspace_path:
+      type: string
+    repo_url:
+      type: string
+    workspace_parent:
+      type: string
+    workspace_name:
+      type: string
+    branch:
       type: string
     runner_command:
       oneOf:

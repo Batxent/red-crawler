@@ -93,19 +93,15 @@ The OpenClaw skill for this project lives at `openclaw-skills/red-crawler-ops/`.
 
 To install it from a local path, point OpenClaw at that folder, or copy the skill directory into your OpenClaw skills location and register the same path.
 
-Before using the skill, run:
-
-```bash
-uv sync
-uv run playwright install chromium
-```
-
 Use the OpenClaw skill actions in this order:
 
+- `install_or_bootstrap` can clone the repository into a target directory, run `uv sync`, install Chromium, and keep going until `state.json` exists.
 - `bootstrap` can initialize the workspace, install Chromium, and keep going until `state.json` exists.
 - `login` creates the Playwright storage state explicitly.
 - `crawl_seed` and `collect_nightly` require an authenticated Playwright storage state file.
 - `report_weekly` and `list_contactable` run from the SQLite database and do not require `--storage-state`.
+
+`install_or_bootstrap` is the lowest-dependency entrypoint. A new user only needs `git`, `uv`, and a machine that can run Playwright Chromium; the skill can handle cloning the repo, syncing Python dependencies, installing Chromium, and starting the interactive login flow.
 
 ## launchd
 

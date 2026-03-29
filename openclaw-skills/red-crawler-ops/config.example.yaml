@@ -1,4 +1,7 @@
 workspace_path: .
+repo_url: https://github.com/Batxent/red-crawler.git
+workspace_parent: .
+workspace_name: red-crawler
 storage_state: ./state.json
 db_path: ./data/red_crawler.db
 report_dir: ./reports

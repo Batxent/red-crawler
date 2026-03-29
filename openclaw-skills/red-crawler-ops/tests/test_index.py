@@ -20,6 +20,8 @@ CONFIG_EXAMPLE_TEXT = (SKILL_DIR / "config.example.yaml").read_text(
     encoding="utf-8"
 )
 README_TEXT = (SKILL_DIR.parents[1] / "README.md").read_text(encoding="utf-8")
+RED_CRAWLER_PYPROJECT = '[project]\nname = "red-crawler"\n'
+OTHER_PYPROJECT = '[project]\nname = "other-project"\n'
 
 
 def run_handler(input_data, context):
@@ -31,6 +33,7 @@ def test_skill_metadata_contract_matches_runtime():
     assert "runtime: python" in MANIFEST_TEXT
     assert "entry: src/index.py" in MANIFEST_TEXT
     assert "- bootstrap" in MANIFEST_TEXT
+    assert "- install_or_bootstrap" in MANIFEST_TEXT
     assert "default_crawl_budget:" in MANIFEST_TEXT
     assert "default_report_days:" in MANIFEST_TEXT
     assert "default_list_limit:" in MANIFEST_TEXT
@@ -50,6 +53,9 @@ def test_skill_metadata_contract_matches_runtime():
     assert "command:" in output_schema
     assert "runner_command:" in CONFIG_EXAMPLE_TEXT
     assert "workspace_path: ." in CONFIG_EXAMPLE_TEXT
+    assert "repo_url: https://github.com/Batxent/red-crawler.git" in CONFIG_EXAMPLE_TEXT
+    assert "workspace_parent: ." in CONFIG_EXAMPLE_TEXT
+    assert "workspace_name: red-crawler" in CONFIG_EXAMPLE_TEXT
     assert "storage_state: ./state.json" in CONFIG_EXAMPLE_TEXT
     assert "db_path: ./data/red_crawler.db" in CONFIG_EXAMPLE_TEXT
     assert "report_dir: ./reports" in CONFIG_EXAMPLE_TEXT
@@ -65,6 +71,7 @@ def test_skill_metadata_contract_matches_runtime():
 
 def test_skill_docs_match_storage_state_behavior():
     assert "bootstrap" in SKILL_TEXT
+    assert "install_or_bootstrap" in SKILL_TEXT
     assert "login` creates the Playwright storage state explicitly" in SKILL_TEXT
     assert "crawl_seed" in SKILL_TEXT
     assert "collect_nightly" in SKILL_TEXT
@@ -79,16 +86,206 @@ def test_skill_docs_match_storage_state_behavior():
     assert "Run a manual crawl with an existing Playwright storage state file" in README_TEXT
     assert "List high-quality contactable creators from the SQLite database" in README_TEXT
     assert "Use the OpenClaw skill actions in this order" in README_TEXT
+    assert "install_or_bootstrap" in README_TEXT
     assert "bootstrap" in README_TEXT
     assert "login` creates the Playwright storage state explicitly" in README_TEXT
     assert "crawl_seed` and `collect_nightly` require an authenticated Playwright storage state file" in README_TEXT
     assert "report_weekly` and `list_contactable` run from the SQLite database and do not require `--storage-state`" in README_TEXT
 
 
+def test_install_or_bootstrap_clones_missing_repo_then_bootstraps(
+    tmp_path, monkeypatch
+):
+    workspace = tmp_path / "red-crawler"
+    commands = []
+
+    def fake_run(argv, cwd, capture_output, text):
+        commands.append((argv, Path(cwd)))
+        if argv[:2] == ["git", "clone"]:
+            workspace.mkdir()
+            (workspace / "pyproject.toml").write_text(
+                RED_CRAWLER_PYPROJECT, encoding="utf-8"
+            )
+        if argv == ["uv", "run", "red-crawler", "login", "--save-state", "./state.json"]:
+            (workspace / "state.json").write_text("{}", encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(INDEX_MODULE.subprocess, "run", fake_run)
+
+    result = run_handler(
+        {
+            "action": "install_or_bootstrap",
+            "workspace_parent": str(tmp_path),
+            "workspace_name": "red-crawler",
+            "storage_state": "./state.json",
+            "repo_url": "https://github.com/Batxent/red-crawler.git",
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "success"
+    assert result["action"] == "install_or_bootstrap"
+    assert result["artifacts"] == {
+        "workspace_path": str(workspace),
+        "state.json": str(workspace / "state.json"),
+    }
+    assert result["metrics"] == {
+        "repo_cloned": True,
+        "uv_sync_ran": True,
+        "playwright_install_ran": True,
+        "login_ran": True,
+        "state_file_created": True,
+    }
+    assert commands == [
+        (
+            [
+                "git",
+                "clone",
+                "https://github.com/Batxent/red-crawler.git",
+                str(workspace),
+            ],
+            tmp_path,
+        ),
+        (["uv", "sync"], workspace),
+        (["uv", "run", "playwright", "install", "chromium"], workspace),
+        (
+            ["uv", "run", "red-crawler", "login", "--save-state", "./state.json"],
+            workspace,
+        ),
+    ]
+
+
+def test_install_or_bootstrap_reuses_existing_workspace(tmp_path, monkeypatch):
+    workspace = tmp_path / "red-crawler"
+    workspace.mkdir()
+    (workspace / "pyproject.toml").write_text(
+        RED_CRAWLER_PYPROJECT, encoding="utf-8"
+    )
+    (workspace / "state.json").write_text("{}", encoding="utf-8")
+    commands = []
+
+    def fake_run(argv, cwd, capture_output, text):
+        commands.append((argv, Path(cwd)))
+        return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(INDEX_MODULE.subprocess, "run", fake_run)
+
+    result = run_handler(
+        {
+            "action": "install_or_bootstrap",
+            "workspace_parent": str(tmp_path),
+            "workspace_name": "red-crawler",
+            "storage_state": "./state.json",
+            "repo_url": "https://github.com/Batxent/red-crawler.git",
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "success"
+    assert result["metrics"] == {
+        "repo_cloned": False,
+        "uv_sync_ran": True,
+        "playwright_install_ran": True,
+        "login_ran": False,
+        "state_file_created": True,
+    }
+    assert commands == [
+        (["uv", "sync"], workspace),
+        (["uv", "run", "playwright", "install", "chromium"], workspace),
+    ]
+
+
+def test_install_or_bootstrap_rejects_existing_non_workspace_directory(tmp_path):
+    workspace = tmp_path / "red-crawler"
+    workspace.mkdir()
+
+    result = run_handler(
+        {
+            "action": "install_or_bootstrap",
+            "workspace_parent": str(tmp_path),
+            "workspace_name": "red-crawler",
+            "storage_state": "./state.json",
+            "repo_url": "https://github.com/Batxent/red-crawler.git",
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "error"
+    assert result["error_type"] == "configuration_error"
+    assert "pyproject.toml" in result["message"]
+
+
+def test_install_or_bootstrap_uses_default_relative_target_for_fresh_install(
+    tmp_path, monkeypatch
+):
+    workspace = tmp_path / "red-crawler"
+    commands = []
+    monkeypatch.chdir(tmp_path)
+
+    def fake_run(argv, cwd, capture_output, text):
+        commands.append((argv, Path(cwd)))
+        if argv[:2] == ["git", "clone"]:
+            workspace.mkdir()
+            (workspace / "pyproject.toml").write_text(
+                RED_CRAWLER_PYPROJECT, encoding="utf-8"
+            )
+        if argv == ["uv", "run", "red-crawler", "login", "--save-state", "./state.json"]:
+            (workspace / "state.json").write_text("{}", encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(INDEX_MODULE.subprocess, "run", fake_run)
+
+    result = run_handler(
+        {"action": "install_or_bootstrap"},
+        {
+            "config": {
+                "workspace_path": ".",
+                "workspace_parent": ".",
+                "workspace_name": "red-crawler",
+                "storage_state": "./state.json",
+                "repo_url": "https://github.com/Batxent/red-crawler.git",
+            }
+        },
+    )
+
+    assert result["status"] == "success"
+    assert result["artifacts"]["workspace_path"] == str(workspace)
+    assert commands[0] == (
+        [
+            "git",
+            "clone",
+            "https://github.com/Batxent/red-crawler.git",
+            str(workspace),
+        ],
+        tmp_path,
+    )
+
+
+def test_install_or_bootstrap_rejects_other_python_workspace(tmp_path):
+    workspace = tmp_path / "red-crawler"
+    workspace.mkdir()
+    (workspace / "pyproject.toml").write_text(OTHER_PYPROJECT, encoding="utf-8")
+
+    result = run_handler(
+        {
+            "action": "install_or_bootstrap",
+            "workspace_parent": str(tmp_path),
+            "workspace_name": "red-crawler",
+            "storage_state": "./state.json",
+            "repo_url": "https://github.com/Batxent/red-crawler.git",
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "error"
+    assert result["error_type"] == "configuration_error"
+    assert "red-crawler" in result["message"]
+
+
 def test_bootstrap_runs_sync_install_and_login_until_state_exists(
     tmp_path, monkeypatch
 ):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
     state_path = tmp_path / "state.json"
     commands = []
 
@@ -127,7 +324,7 @@ def test_bootstrap_runs_sync_install_and_login_until_state_exists(
 
 
 def test_bootstrap_skips_login_when_state_already_exists(tmp_path, monkeypatch):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
     state_path = tmp_path / "state.json"
     state_path.write_text("{}", encoding="utf-8")
     commands = []
@@ -161,7 +358,7 @@ def test_bootstrap_skips_login_when_state_already_exists(tmp_path, monkeypatch):
 
 
 def test_bootstrap_force_login_even_if_state_exists(tmp_path, monkeypatch):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
     state_path = tmp_path / "state.json"
     state_path.write_text("{}", encoding="utf-8")
     commands = []
@@ -197,7 +394,7 @@ def test_bootstrap_force_login_even_if_state_exists(tmp_path, monkeypatch):
 def test_bootstrap_returns_artifact_error_when_login_does_not_create_state(
     tmp_path, monkeypatch
 ):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
     state_path = tmp_path / "state.json"
 
     monkeypatch.setattr(
@@ -240,7 +437,7 @@ def test_collect_nightly_requires_storage_state():
 
 
 def test_crawl_seed_requires_storage_state(tmp_path):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
     result = run_handler(
         {
             "action": "crawl_seed",
@@ -255,7 +452,7 @@ def test_crawl_seed_requires_storage_state(tmp_path):
 
 
 def test_login_requires_storage_state(tmp_path):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
     result = run_handler(
         {"action": "login", "workspace_path": str(tmp_path)},
         {"config": {}},
@@ -266,7 +463,7 @@ def test_login_requires_storage_state(tmp_path):
 
 
 def test_report_weekly_does_not_require_storage_state(tmp_path, monkeypatch):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
     report_dir = tmp_path / "reports"
     report_dir.mkdir()
     (report_dir / "weekly-growth-report.json").write_text("{}", encoding="utf-8")
@@ -294,7 +491,7 @@ def test_report_weekly_does_not_require_storage_state(tmp_path, monkeypatch):
 def test_collect_nightly_uses_default_crawl_budget_from_context_config(
     tmp_path, monkeypatch
 ):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
     report_dir = tmp_path / "reports"
     report_dir.mkdir()
     (report_dir / "daily-run-report.json").write_text("{}", encoding="utf-8")
@@ -338,7 +535,7 @@ def test_collect_nightly_uses_default_crawl_budget_from_context_config(
 def test_report_weekly_uses_default_report_days_from_context_config(
     tmp_path, monkeypatch
 ):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
     report_dir = tmp_path / "reports"
     report_dir.mkdir()
     (report_dir / "weekly-growth-report.json").write_text("{}", encoding="utf-8")
@@ -378,7 +575,7 @@ def test_report_weekly_uses_default_report_days_from_context_config(
 def test_list_contactable_uses_default_list_limit_from_context_config(
     tmp_path, monkeypatch
 ):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
 
     def fake_run(argv, cwd, capture_output, text):
         assert argv == [
@@ -411,7 +608,7 @@ def test_list_contactable_uses_default_list_limit_from_context_config(
 
 
 def test_list_contactable_does_not_require_storage_state(tmp_path, monkeypatch):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
     monkeypatch.setattr(
         INDEX_MODULE.subprocess,
         "run",
@@ -432,7 +629,7 @@ def test_list_contactable_does_not_require_storage_state(tmp_path, monkeypatch):
 
 
 def test_workspace_path_can_come_from_context_config(tmp_path, monkeypatch):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
     monkeypatch.setattr(
         INDEX_MODULE.subprocess,
         "run",
@@ -450,7 +647,7 @@ def test_workspace_path_can_come_from_context_config(tmp_path, monkeypatch):
 
 
 def test_handler_rejects_non_mapping_input(tmp_path):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
     result = run_handler(
         "bad-input",
         {"config": {"workspace_path": str(tmp_path)}},
@@ -668,7 +865,7 @@ def test_build_list_contactable_command_uses_defaults_and_overrides(tmp_path):
 
 
 def test_handler_returns_structured_success_for_report_weekly(tmp_path, monkeypatch):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
     report_dir = tmp_path / "reports"
     report_dir.mkdir()
     weekly_report = report_dir / "weekly-growth-report.json"
@@ -725,7 +922,7 @@ def test_handler_returns_structured_success_for_report_weekly(tmp_path, monkeypa
 def test_handler_finds_relative_report_artifacts_under_workspace(
     tmp_path, monkeypatch
 ):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
     report_dir = tmp_path / "reports"
     report_dir.mkdir()
     weekly_report = report_dir / "weekly-growth-report.json"
@@ -761,7 +958,7 @@ def test_handler_finds_relative_report_artifacts_under_workspace(
 def test_handler_uses_default_output_dir_for_crawl_seed_artifacts(
     tmp_path, monkeypatch
 ):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
     output_dir = tmp_path / "output"
     output_dir.mkdir()
     accounts_csv = output_dir / "accounts.csv"
@@ -800,7 +997,7 @@ def test_handler_uses_default_output_dir_for_crawl_seed_artifacts(
 def test_handler_uses_default_report_dir_for_weekly_artifacts(
     tmp_path, monkeypatch
 ):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
     report_dir = tmp_path / "reports"
     report_dir.mkdir()
     weekly_report = report_dir / "weekly-growth-report.json"
@@ -833,7 +1030,7 @@ def test_handler_uses_default_report_dir_for_weekly_artifacts(
 
 
 def test_handler_maps_non_zero_exit_to_execution_error(tmp_path, monkeypatch):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
 
     def fake_run(argv, cwd, capture_output, text):
         return subprocess.CompletedProcess(argv, 2, stdout="", stderr="boom")
@@ -864,7 +1061,7 @@ def test_handler_maps_non_zero_exit_to_execution_error(tmp_path, monkeypatch):
 def test_handler_maps_subprocess_start_failure_to_execution_error(
     tmp_path, monkeypatch
 ):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
 
     def fake_run(argv, cwd, capture_output, text):
         raise FileNotFoundError("uv not found")
@@ -895,7 +1092,7 @@ def test_handler_maps_subprocess_start_failure_to_execution_error(
 def test_handler_returns_artifact_error_for_missing_crawl_seed_outputs(
     tmp_path, monkeypatch
 ):
-    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
     output_dir = tmp_path / "output"
     output_dir.mkdir()
     (output_dir / "accounts.csv").write_text("id\n1\n", encoding="utf-8")
