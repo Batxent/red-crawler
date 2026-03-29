@@ -610,6 +610,80 @@ def test_handler_finds_relative_report_artifacts_under_workspace(
     }
 
 
+def test_handler_uses_default_output_dir_for_crawl_seed_artifacts(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    accounts_csv = output_dir / "accounts.csv"
+    accounts_csv.write_text("id\n1\n", encoding="utf-8")
+    contact_leads_csv = output_dir / "contact_leads.csv"
+    contact_leads_csv.write_text("id\n1\n", encoding="utf-8")
+    run_report_json = output_dir / "run_report.json"
+    run_report_json.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        INDEX_MODULE.subprocess,
+        "run",
+        lambda argv, cwd, capture_output, text: subprocess.CompletedProcess(
+            argv, 0, stdout="ok", stderr=""
+        ),
+    )
+
+    result = run_handler(
+        {
+            "action": "crawl_seed",
+            "workspace_path": str(tmp_path),
+            "storage_state": str(tmp_path / "state.json"),
+            "seed_url": "https://www.xiaohongshu.com/user/profile/user-001",
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "success"
+    assert result["artifacts"] == {
+        "accounts.csv": str(accounts_csv),
+        "contact_leads.csv": str(contact_leads_csv),
+        "run_report.json": str(run_report_json),
+    }
+
+
+def test_handler_uses_default_report_dir_for_weekly_artifacts(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+    weekly_report = report_dir / "weekly-growth-report.json"
+    weekly_report.write_text("{}", encoding="utf-8")
+    creators_csv = report_dir / "contactable_creators.csv"
+    creators_csv.write_text("id\n1\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        INDEX_MODULE.subprocess,
+        "run",
+        lambda argv, cwd, capture_output, text: subprocess.CompletedProcess(
+            argv, 0, stdout="ok", stderr=""
+        ),
+    )
+
+    result = run_handler(
+        {
+            "action": "report_weekly",
+            "workspace_path": str(tmp_path),
+            "db_path": str(tmp_path / "data.db"),
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "success"
+    assert result["artifacts"] == {
+        "weekly-growth-report.json": str(weekly_report),
+        "contactable_creators.csv": str(creators_csv),
+    }
+
+
 def test_handler_maps_non_zero_exit_to_execution_error(tmp_path, monkeypatch):
     (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
 

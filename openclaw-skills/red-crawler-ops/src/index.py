@@ -33,6 +33,12 @@ CONFIG_DEFAULTS = (
     ("default_list_limit", "limit"),
 )
 
+CLI_ARTIFACT_DEFAULTS = {
+    "crawl_seed": "output",
+    "collect_nightly": "reports",
+    "report_weekly": "reports",
+}
+
 
 def extract_config(context):
     if not isinstance(context, dict):
@@ -187,7 +193,10 @@ def _workspace_root(resolved):
 def _resolve_artifact_dir(path_value, resolved):
     base = _workspace_root(resolved)
     if path_value is None:
-        return base
+        default_dir = CLI_ARTIFACT_DEFAULTS.get(str(resolved.get("action", "")).strip().lower())
+        if default_dir is None:
+            return base
+        return base / default_dir
 
     path = Path(path_value)
     if path.is_absolute():
