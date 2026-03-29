@@ -32,3 +32,27 @@ def test_collect_nightly_requires_storage_state():
     assert result["status"] == "error"
     assert result["error_type"] == "configuration_error"
     assert "storage_state" in result["suggested_fix"]
+
+
+def test_workspace_path_can_come_from_context_config(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    result = run_handler(
+        {"action": "login", "storage_state": str(tmp_path / "state.json")},
+        {"config": {"workspace_path": str(tmp_path)}},
+    )
+    assert result["status"] != "error"
+    assert result.get("error_type") != "configuration_error"
+
+
+def test_workspace_path_must_contain_pyproject(tmp_path):
+    result = run_handler(
+        {
+            "action": "login",
+            "workspace_path": str(tmp_path),
+            "storage_state": str(tmp_path / "state.json"),
+        },
+        {"config": {}},
+    )
+    assert result["status"] == "error"
+    assert result["error_type"] == "configuration_error"
+    assert "pyproject.toml" in result["message"]
