@@ -33,6 +33,7 @@ HIGH_RISK_PAGE_MARKERS = {
     ),
 }
 
+DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
 def classify_high_risk_page(body_text: str) -> str | None:
     text = body_text.strip()
@@ -131,7 +132,10 @@ class BrowserSession:
             )
         self._playwright = sync_playwright().start()
         browser = self._playwright.chromium.launch(headless=self.headless)
-        self._context = browser.new_context(storage_state=self.storage_state)
+        self._context = browser.new_context(
+            storage_state=self.storage_state,
+            user_agent=DEFAULT_USER_AGENT,
+        )
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -335,7 +339,7 @@ def save_login_storage_state(
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=False)
-        context = browser.new_context()
+        context = browser.new_context(user_agent=DEFAULT_USER_AGENT)
         page = context.new_page()
         stealth_sync(page)
         try:
@@ -361,7 +365,10 @@ def open_xiaohongshu(
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=False)
-        context = browser.new_context(storage_state=str(storage_state_path))
+        context = browser.new_context(
+            storage_state=str(storage_state_path),
+            user_agent=DEFAULT_USER_AGENT,
+        )
         page = context.new_page()
         stealth_sync(page)
         try:
