@@ -11,6 +11,7 @@ from typing import Callable, List
 from urllib.parse import quote, urljoin
 
 from playwright.sync_api import BrowserContext, Page, Playwright, sync_playwright
+from playwright_stealth import stealth_sync
 
 
 class RiskControlTriggered(RuntimeError):
@@ -57,7 +58,9 @@ class SafeModeController:
             return
         self.request_count += 1
         delay = self.rng.uniform(3.0, 9.0)
-        self.log_fn(f"safe-mode: sleeping {delay:.1f}s before request #{self.request_count}")
+        self.log_fn(
+            f"safe-mode: sleeping {delay:.1f}s before request #{self.request_count}"
+        )
         self.sleep_fn(delay)
         if self.request_count % self.pause_every == 0:
             pause = self.rng.uniform(8.0, 15.0)
@@ -75,7 +78,9 @@ class SafeModeController:
 
         if self.rng.random() < 0.65:
             scroll_ratio = self.rng.uniform(0.22, 0.78)
-            page.evaluate(f"window.scrollTo(0, document.body.scrollHeight * {scroll_ratio:.2f})")
+            page.evaluate(
+                f"window.scrollTo(0, document.body.scrollHeight * {scroll_ratio:.2f})"
+            )
             settle = self.rng.uniform(1.0, 2.6)
             self.log_fn(
                 f"safe-mode: settling for {settle:.1f}s after partial scroll on {page_kind} page"
@@ -112,7 +117,7 @@ class SafeModeController:
 
 
 class BrowserSession:
-    def __init__(self, storage_state: str, headless: bool = True):
+    def __init__(self, storage_state: str, headless: bool = False):
         self.storage_state = str(storage_state)
         self.headless = headless
         self._playwright: Playwright | None = None
@@ -144,7 +149,9 @@ class BrowserSession:
         return self._context
 
     def new_page(self) -> Page:
-        return self.context.new_page()
+        page = self.context.new_page()
+        stealth_sync(page)
+        return page
 
 
 class PlaywrightCrawlerClient:
@@ -193,7 +200,9 @@ class PlaywrightCrawlerClient:
         try:
             response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
             if response is not None and response.status >= 400:
-                self.safe_mode_controller.on_risk_event(reason=f"http_{response.status}")
+                self.safe_mode_controller.on_risk_event(
+                    reason=f"http_{response.status}"
+                )
                 raise RuntimeError(f"page request failed with status {response.status}")
             try:
                 page.wait_for_load_state("networkidle", timeout=5000)
@@ -205,7 +214,9 @@ class PlaywrightCrawlerClient:
                 self.safe_mode_controller.on_risk_event(reason=risk_type)
                 raise RuntimeError(f"high risk page detected: {risk_type}")
             if "未连接到服务器，刷新一下试试" in body_text:
-                self.safe_mode_controller.on_risk_event(reason="server_connection_error")
+                self.safe_mode_controller.on_risk_event(
+                    reason="server_connection_error"
+                )
                 page.reload(wait_until="domcontentloaded", timeout=30000)
                 try:
                     page.wait_for_load_state("networkidle", timeout=5000)
@@ -223,7 +234,9 @@ class PlaywrightCrawlerClient:
         try:
             response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
             if response is not None and response.status >= 400:
-                self.safe_mode_controller.on_risk_event(reason=f"http_{response.status}")
+                self.safe_mode_controller.on_risk_event(
+                    reason=f"http_{response.status}"
+                )
                 raise RuntimeError(f"page request failed with status {response.status}")
             html_snapshots: List[str] = []
             last_length = -1
@@ -243,7 +256,9 @@ class PlaywrightCrawlerClient:
                 if html not in html_snapshots:
                     html_snapshots.append(html)
 
-                card_count = page.locator(".card-bottom-wrapper a.author[href*='/user/profile/']").count()
+                card_count = page.locator(
+                    ".card-bottom-wrapper a.author[href*='/user/profile/']"
+                ).count()
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 page.wait_for_timeout(1200)
                 if card_count == last_length:
@@ -262,11 +277,15 @@ class PlaywrightCrawlerClient:
         cache_path = self._cache_path("profiles", profile_url)
         if cache_path is not None and cache_path.exists():
             if self._is_cache_fresh(cache_path):
-                self.safe_mode_controller.log_fn("safe-mode: loaded profile from disk cache")
+                self.safe_mode_controller.log_fn(
+                    "safe-mode: loaded profile from disk cache"
+                )
                 html = cache_path.read_text(encoding="utf-8")
                 self._profile_html_cache[profile_url] = html
                 return html
-            self.safe_mode_controller.log_fn("safe-mode: disk cache expired for profile")
+            self.safe_mode_controller.log_fn(
+                "safe-mode: disk cache expired for profile"
+            )
         html = self._load_html(profile_url)
         self._profile_html_cache[profile_url] = html
         if cache_path is not None:
@@ -276,7 +295,9 @@ class PlaywrightCrawlerClient:
 
     def fetch_note_recommendation_html(self, profile_url: str) -> List[str]:
         profile_html = self.fetch_profile_html(profile_url)
-        note_links = extract_note_detail_urls(profile_html, self.base_url, max_results=3)
+        note_links = extract_note_detail_urls(
+            profile_html, self.base_url, max_results=3
+        )
         return [self._load_html(note_url) for note_url in note_links]
 
     def fetch_search_result_htmls(self, query: str) -> List[str]:
@@ -286,7 +307,9 @@ class PlaywrightCrawlerClient:
         cache_path = self._cache_path("search", query)
         if cache_path is not None and cache_path.exists():
             if self._is_cache_fresh(cache_path):
-                self.safe_mode_controller.log_fn("safe-mode: loaded search from disk cache")
+                self.safe_mode_controller.log_fn(
+                    "safe-mode: loaded search from disk cache"
+                )
                 htmls = json.loads(cache_path.read_text(encoding="utf-8"))
                 self._search_html_cache[query] = list(htmls)
                 return list(htmls)
@@ -314,6 +337,7 @@ def save_login_storage_state(
         browser = playwright.chromium.launch(headless=False)
         context = browser.new_context()
         page = context.new_page()
+        stealth_sync(page)
         try:
             page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
             print("登录完成后，回到终端按回车保存 storage_state...", end="", flush=True)
@@ -339,6 +363,7 @@ def open_xiaohongshu(
         browser = playwright.chromium.launch(headless=False)
         context = browser.new_context(storage_state=str(storage_state_path))
         page = context.new_page()
+        stealth_sync(page)
         try:
             page.goto(open_url, wait_until="domcontentloaded", timeout=30000)
             print("浏览器已打开，回到终端按回车关闭会话...", end="", flush=True)
@@ -354,7 +379,9 @@ def extract_note_detail_urls(
     max_results: int = 3,
 ) -> List[str]:
     note_links: List[str] = []
-    for href in re.findall(r'href="([^"]*/user/profile/[^"]+xsec_source=pc_user[^"]*)"', profile_html):
+    for href in re.findall(
+        r'href="([^"]*/user/profile/[^"]+xsec_source=pc_user[^"]*)"', profile_html
+    ):
         resolved = urljoin(f"{base_url.rstrip('/')}/", href.replace("&amp;", "&"))
         if resolved not in note_links:
             note_links.append(resolved)
