@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shlex
 import subprocess
 import tomllib
@@ -11,6 +12,8 @@ KNOWN_ACTIONS = {
     "bootstrap",
     "install_or_bootstrap",
     "login",
+    "login_qr_start",
+    "login_qr_finish",
     "crawl_seed",
     "collect_nightly",
     "report_weekly",
@@ -107,12 +110,49 @@ def _extend_bool_flag(argv, flag, value):
         argv.append(flag)
 
 
+
+
+def _login_qr_path(resolved):
+    path_value = resolved.get("qr_path")
+    if path_value:
+        return _resolve_workspace_path_value(path_value, resolved)
+    return _resolve_workspace_path_value(resolved["storage_state"], resolved).with_suffix(
+        ".login-qr.png"
+    )
+
+
+def _login_qr_session_path(resolved):
+    path_value = resolved.get("session_path")
+    if path_value:
+        return _resolve_workspace_path_value(path_value, resolved)
+    return _resolve_workspace_path_value(resolved["storage_state"], resolved).with_suffix(
+        ".login-session.json"
+    )
+
 def build_login_command(resolved):
     argv = _get_runner_command(resolved) + ["login"]
     _extend_flag(argv, "--save-state", resolved.get("storage_state"))
     _extend_flag(argv, "--login-url", resolved.get("login_url"))
     return argv
 
+
+
+
+def build_login_qr_start_command(resolved):
+    argv = _get_runner_command(resolved) + ["login-qr-start"]
+    _extend_flag(argv, "--save-state", resolved.get("storage_state"))
+    _extend_flag(argv, "--login-url", resolved.get("login_url"))
+    _extend_flag(argv, "--qr-path", _login_qr_path(resolved))
+    _extend_flag(argv, "--session-path", _login_qr_session_path(resolved))
+    _extend_flag(argv, "--timeout", resolved.get("login_timeout"))
+    return argv
+
+
+def build_login_qr_finish_command(resolved):
+    argv = _get_runner_command(resolved) + ["login-qr-finish"]
+    _extend_flag(argv, "--save-state", resolved.get("storage_state"))
+    _extend_flag(argv, "--session-path", _login_qr_session_path(resolved))
+    return argv
 
 def build_crawl_seed_command(resolved):
     argv = _get_runner_command(resolved) + ["crawl-seed"]
@@ -180,6 +220,10 @@ def build_command(resolved):
         raise ValueError("bootstrap uses multi-step execution")
     if action == "login":
         return build_login_command(resolved)
+    if action == "login_qr_start":
+        return build_login_qr_start_command(resolved)
+    if action == "login_qr_finish":
+        return build_login_qr_finish_command(resolved)
     if action == "crawl_seed":
         return build_crawl_seed_command(resolved)
     if action == "collect_nightly":
@@ -241,6 +285,23 @@ def _artifact_root(action, resolved):
 
 
 def _collect_artifacts(action, resolved):
+    if action == "login_qr_start":
+        artifacts = {}
+        missing = []
+        qr_path = _login_qr_path(resolved)
+        session_path = _login_qr_session_path(resolved)
+        if qr_path.exists():
+            artifacts[qr_path.name] = str(qr_path)
+        else:
+            missing.append(qr_path.name)
+        if session_path.exists():
+            artifacts[session_path.name] = str(session_path)
+        return artifacts, missing
+    if action == "login_qr_finish":
+        state_path = _resolve_workspace_path_value(resolved["storage_state"], resolved)
+        if state_path.exists():
+            return {state_path.name: str(state_path)}, []
+        return {}, []
     expected = EXPECTED_ARTIFACTS.get(action, ())
     if not expected:
         return {}, []
@@ -266,7 +327,7 @@ def validate_request(resolved):
             "validation_error",
             f"Unsupported action: {resolved.get('action')}",
             (
-                "Use one of: install_or_bootstrap, bootstrap, login, crawl_seed, "
+                "Use one of: install_or_bootstrap, bootstrap, login, login_qr_start, login_qr_finish, crawl_seed, "
                 "collect_nightly, report_weekly, list_contactable."
             ),
         )
@@ -286,7 +347,7 @@ def validate_request(resolved):
             "Provide workspace_path directly or set it in context.config.",
         )
 
-    if action in {"bootstrap", "login", "crawl_seed", "collect_nightly"} and not resolved.get(
+    if action in {"bootstrap", "login", "login_qr_start", "login_qr_finish", "crawl_seed", "collect_nightly"} and not resolved.get(
         "storage_state"
     ):
         return structured_error(

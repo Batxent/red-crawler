@@ -67,6 +67,8 @@ input_schema:
         - install_or_bootstrap
         - bootstrap
         - login
+        - login_qr_start
+        - login_qr_finish
         - crawl_seed
         - collect_nightly
         - report_weekly
@@ -93,6 +95,12 @@ input_schema:
       type: string
     login_url:
       type: string
+    qr_path:
+      type: string
+    session_path:
+      type: string
+    login_timeout:
+      type: integer
     force_login:
       type: boolean
     sync_dependencies:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
@@ -12,10 +13,23 @@ from red_crawler.nightly import (
     write_weekly_reports,
 )
 from red_crawler.runner import CrawlConfig, run_crawl_seed
-from red_crawler.session import open_xiaohongshu, save_login_storage_state
+from red_crawler.session import (
+    open_xiaohongshu,
+    save_login_storage_state,
+    start_qr_login_storage_state,
+    wait_for_qr_login_storage_state,
+)
 from red_crawler.store import CrawlerStore
 
 
+
+
+def _default_login_qr_path(save_state: str) -> Path:
+    return Path(save_state).with_suffix(".login-qr.png")
+
+
+def _default_login_session_path(save_state: str) -> Path:
+    return Path(save_state).with_suffix(".login-session.json")
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="red-crawler")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -35,6 +49,23 @@ def build_parser() -> argparse.ArgumentParser:
     login = subparsers.add_parser("login")
     login.add_argument("--save-state", required=True)
     login.add_argument("--login-url", default="https://www.xiaohongshu.com")
+    login_qr_start = subparsers.add_parser("login-qr-start")
+    login_qr_start.add_argument("--save-state", required=True)
+    login_qr_start.add_argument("--login-url", default="https://www.xiaohongshu.com")
+    login_qr_start.add_argument("--qr-path")
+    login_qr_start.add_argument("--session-path")
+    login_qr_start.add_argument("--timeout", type=int, default=180)
+
+    login_qr_finish = subparsers.add_parser("login-qr-finish")
+    login_qr_finish.add_argument("--save-state", required=True)
+    login_qr_finish.add_argument("--session-path")
+
+    login_qr_worker = subparsers.add_parser("login-qr-worker")
+    login_qr_worker.add_argument("--save-state", required=True)
+    login_qr_worker.add_argument("--login-url", default="https://www.xiaohongshu.com")
+    login_qr_worker.add_argument("--qr-path", required=True)
+    login_qr_worker.add_argument("--session-path", required=True)
+    login_qr_worker.add_argument("--timeout", type=int, default=180)
 
     open_page = subparsers.add_parser("open")
     open_page.add_argument("--storage-state", required=True)
@@ -77,6 +108,60 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
 
+
+    if args.command == "login-qr-start":
+        qr_path = Path(args.qr_path) if args.qr_path else _default_login_qr_path(args.save_state)
+        session_path = (
+            Path(args.session_path)
+            if args.session_path
+            else _default_login_session_path(args.save_state)
+        )
+        pid = start_qr_login_storage_state(
+            output_path=Path(args.save_state),
+            login_url=args.login_url,
+            qr_path=qr_path,
+            session_path=session_path,
+            timeout_seconds=args.timeout,
+        )
+        print(
+            json.dumps(
+                {
+                    "pid": pid,
+                    "qr_path": str(qr_path),
+                    "session_path": str(session_path),
+                    "storage_state": str(Path(args.save_state)),
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
+
+    if args.command == "login-qr-worker":
+        wait_for_qr_login_storage_state(
+            output_path=Path(args.save_state),
+            login_url=args.login_url,
+            qr_path=Path(args.qr_path),
+            session_path=Path(args.session_path),
+            timeout_seconds=args.timeout,
+        )
+        return 0
+
+    if args.command == "login-qr-finish":
+        state_path = Path(args.save_state)
+        session_path = (
+            Path(args.session_path)
+            if args.session_path
+            else _default_login_session_path(args.save_state)
+        )
+        if state_path.exists():
+            print(json.dumps({"status": "authenticated", "storage_state": str(state_path)}))
+            return 0
+        if not session_path.exists():
+            print(json.dumps({"status": "missing_session", "session_path": str(session_path)}))
+            return 2
+        status = json.loads(session_path.read_text(encoding="utf-8"))
+        print(json.dumps(status, ensure_ascii=False))
+        return 0
     if args.command == "open":
         open_xiaohongshu(
             storage_state=args.storage_state,

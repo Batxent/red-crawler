@@ -1,10 +1,13 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pickle
 import random
 import re
+import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -378,6 +381,173 @@ def save_login_storage_state(
             print(f"\nsaved to {state_path}")
         finally:
             browser.close()
+
+
+
+def _storage_state_has_auth_cookie(state: dict) -> bool:
+    for cookie in state.get("cookies", []):
+        domain = str(cookie.get("domain", ""))
+        name = str(cookie.get("name", "")).lower()
+        if "xiaohongshu.com" not in domain:
+            continue
+        if name in {"web_session", "web_session_id", "xsecappid"}:
+            return True
+    return False
+
+
+def _write_login_qr_status(session_path: Path, status: dict) -> None:
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    session_path.write_text(
+        json.dumps(status, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def wait_for_qr_login_storage_state(
+    output_path: str | Path,
+    *,
+    login_url: str = "https://www.xiaohongshu.com",
+    qr_path: str | Path,
+    session_path: str | Path,
+    timeout_seconds: int = 180,
+) -> None:
+    state_path = Path(output_path)
+    qr_image_path = Path(qr_path)
+    session_json_path = Path(session_path)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    qr_image_path.parent.mkdir(parents=True, exist_ok=True)
+    fp = _get_or_create_fingerprint(state_path)
+    deadline = time.time() + timeout_seconds
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        context = NewContext(browser, fingerprint=fp)
+        page = context.new_page()
+        stealth_sync(page)
+        try:
+            page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(3000)
+            page.screenshot(path=str(qr_image_path), full_page=True)
+            _write_login_qr_status(
+                session_json_path,
+                {
+                    "status": "waiting_for_scan",
+                    "pid": os.getpid(),
+                    "storage_state": str(state_path),
+                    "qr_path": str(qr_image_path),
+                    "login_url": login_url,
+                    "deadline_epoch": deadline,
+                },
+            )
+            while time.time() < deadline:
+                state = context.storage_state()
+                if _storage_state_has_auth_cookie(state):
+                    context.storage_state(path=str(state_path))
+                    _write_login_qr_status(
+                        session_json_path,
+                        {
+                            "status": "authenticated",
+                            "pid": os.getpid(),
+                            "storage_state": str(state_path),
+                            "qr_path": str(qr_image_path),
+                            "login_url": login_url,
+                        },
+                    )
+                    return
+                page.wait_for_timeout(2000)
+
+            _write_login_qr_status(
+                session_json_path,
+                {
+                    "status": "timeout",
+                    "pid": os.getpid(),
+                    "storage_state": str(state_path),
+                    "qr_path": str(qr_image_path),
+                    "login_url": login_url,
+                },
+            )
+            raise TimeoutError("timed out waiting for QR login")
+        except Exception as exc:
+            if not session_json_path.exists() or json.loads(
+                session_json_path.read_text(encoding="utf-8")
+            ).get("status") not in {"authenticated", "timeout"}:
+                _write_login_qr_status(
+                    session_json_path,
+                    {
+                        "status": "error",
+                        "pid": os.getpid(),
+                        "storage_state": str(state_path),
+                        "qr_path": str(qr_image_path),
+                        "login_url": login_url,
+                        "error": str(exc),
+                    },
+                )
+            raise
+        finally:
+            browser.close()
+
+
+def start_qr_login_storage_state(
+    output_path: str | Path,
+    *,
+    login_url: str = "https://www.xiaohongshu.com",
+    qr_path: str | Path,
+    session_path: str | Path,
+    timeout_seconds: int = 180,
+) -> int:
+    state_path = Path(output_path)
+    qr_image_path = Path(qr_path)
+    session_json_path = Path(session_path)
+    log_path = session_json_path.with_suffix(".log")
+    session_json_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_login_qr_status(
+        session_json_path,
+        {
+            "status": "starting",
+            "storage_state": str(state_path),
+            "qr_path": str(qr_image_path),
+            "login_url": login_url,
+        },
+    )
+    command = [
+        sys.executable,
+        "-m",
+        "red_crawler.cli",
+        "login-qr-worker",
+        "--save-state",
+        str(state_path),
+        "--login-url",
+        login_url,
+        "--qr-path",
+        str(qr_image_path),
+        "--session-path",
+        str(session_json_path),
+        "--timeout",
+        str(timeout_seconds),
+    ]
+    with log_path.open("ab") as log_file:
+        kwargs = {
+            "stdout": log_file,
+            "stderr": subprocess.STDOUT,
+            "stdin": subprocess.DEVNULL,
+            "close_fds": os.name != "nt",
+        }
+        if os.name == "nt":
+            kwargs["creationflags"] = (
+                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            )
+        else:
+            kwargs["start_new_session"] = True
+        process = subprocess.Popen(command, **kwargs)
+    status = json.loads(session_json_path.read_text(encoding="utf-8"))
+    status["pid"] = process.pid
+    status["log_path"] = str(log_path)
+    _write_login_qr_status(session_json_path, status)
+    for _ in range(30):
+        if qr_image_path.exists():
+            break
+        time.sleep(0.5)
+    return process.pid
 
 
 def open_xiaohongshu(
