@@ -12,6 +12,7 @@ dependencies = [
   "beautifulsoup4>=4.13.3",
   "playwright>=1.52.0",
   "playwright-stealth",
+  "browserforge",
 ]
 
 [dependency-groups]

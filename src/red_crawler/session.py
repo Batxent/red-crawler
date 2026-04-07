@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import pickle
 import random
 import re
 import time
@@ -12,6 +13,8 @@ from urllib.parse import quote, urljoin
 
 from playwright.sync_api import BrowserContext, Page, Playwright, sync_playwright
 from playwright_stealth import stealth_sync
+from browserforge.injectors.playwright import NewContext
+from browserforge.fingerprints import FingerprintGenerator, Fingerprint
 
 
 class RiskControlTriggered(RuntimeError):
@@ -33,7 +36,25 @@ HIGH_RISK_PAGE_MARKERS = {
     ),
 }
 
-DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+def _get_or_create_fingerprint(storage_state_path: Path) -> Fingerprint:
+    fp_path = storage_state_path.with_suffix(".fingerprint.pkl")
+    if fp_path.exists():
+        try:
+            with open(fp_path, "rb") as f:
+                return pickle.load(f)
+        except Exception:
+            pass
+    fp = FingerprintGenerator(os=("windows",)).generate()
+    try:
+        if not storage_state_path.parent.exists():
+            storage_state_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(fp_path, "wb") as f:
+            pickle.dump(fp, f)
+    except Exception:
+        pass
+    return fp
+
 
 def classify_high_risk_page(body_text: str) -> str | None:
     text = body_text.strip()
@@ -132,9 +153,11 @@ class BrowserSession:
             )
         self._playwright = sync_playwright().start()
         browser = self._playwright.chromium.launch(headless=self.headless)
-        self._context = browser.new_context(
+        fp = _get_or_create_fingerprint(storage_state_path)
+        self._context = NewContext(
+            browser,
+            fingerprint=fp,
             storage_state=self.storage_state,
-            user_agent=DEFAULT_USER_AGENT,
         )
         return self
 
@@ -336,10 +359,14 @@ def save_login_storage_state(
 ) -> None:
     state_path = Path(output_path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
+    fp = _get_or_create_fingerprint(state_path)
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=False)
-        context = browser.new_context(user_agent=DEFAULT_USER_AGENT)
+        context = NewContext(
+            browser,
+            fingerprint=fp,
+        )
         page = context.new_page()
         stealth_sync(page)
         try:
@@ -363,11 +390,13 @@ def open_xiaohongshu(
             f"storage state file not found: {storage_state_path.as_posix()}"
         )
 
+    fp = _get_or_create_fingerprint(storage_state_path)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=False)
-        context = browser.new_context(
+        context = NewContext(
+            browser,
+            fingerprint=fp,
             storage_state=str(storage_state_path),
-            user_agent=DEFAULT_USER_AGENT,
         )
         page = context.new_page()
         stealth_sync(page)
