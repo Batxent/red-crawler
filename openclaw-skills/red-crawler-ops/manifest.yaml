@@ -2,7 +2,7 @@ name: red-crawler-ops
 version: 1.0.0
 runtime: python
 entry: src/index.py
-description: Portable OpenClaw skill for running the red-crawler CLI across login, crawl, collection, and reporting workflows.
+description: Portable OpenClaw skill for running the red-crawler CLI. Automatically parses natural language intents into appropriate actions: setup ("帮我初始化爬虫" -> install_or_bootstrap), login ("我要登录" -> login), crawling new profiles ("帮我去爬10个相关的博主 [URL]" -> crawl_seed with max_accounts), nightly collection ("执行夜间采集" -> collect_nightly), reporting ("生成本周的爬取周报" -> report_weekly), and querying existing local DB ("从数据库中找出10个美妆博主" -> list_contactable).
 config:
   workspace_path:
     type: string
