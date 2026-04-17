@@ -1,4 +1,4 @@
-import csv
+﻿import csv
 import json
 
 from red_crawler.cli import main
@@ -18,9 +18,9 @@ def test_cli_crawl_seed_exports_expected_files(tmp_path, monkeypatch):
                 AccountRecord(
                     account_id="user-001",
                     profile_url=config.seed_url,
-                    nickname="Mia穿搭手记",
-                    bio_text="商务合作 vx：Mia_Studio88",
-                    visible_metadata={"location": "上海"},
+                    nickname="Miaç©¿æ­æ‰‹è®°",
+                    bio_text="å•†åŠ¡åˆä½œ vxï¼šMia_Studio88",
+                    visible_metadata={"location": "ä¸Šæµ·"},
                     source_type="seed",
                     source_from=None,
                     crawl_status="success",
@@ -32,7 +32,7 @@ def test_cli_crawl_seed_exports_expected_files(tmp_path, monkeypatch):
                     account_id="user-001",
                     lead_type="wechat",
                     normalized_value="mia_studio88",
-                    raw_snippet="vx：Mia_Studio88",
+                    raw_snippet="vxï¼šMia_Studio88",
                     confidence=0.98,
                     extractor_name="wechat_regex",
                     source_field="bio",
@@ -75,7 +75,7 @@ def test_cli_crawl_seed_exports_expected_files(tmp_path, monkeypatch):
         rows = list(csv.DictReader(fh))
     report = json.loads((tmp_path / "run_report.json").read_text(encoding="utf-8"))
 
-    assert rows[0]["nickname"] == "Mia穿搭手记"
+    assert rows[0]["nickname"] == "Miaç©¿æ­æ‰‹è®°"
     assert report["succeeded_accounts"] == 1
 
 
@@ -177,6 +177,57 @@ def test_cli_crawl_seed_persists_result_to_database(tmp_path, monkeypatch):
     assert exit_code == 0
     assert captured["db_path"] == tmp_path / "red-crawler.db"
     assert captured["run_type"] == "crawl_seed"
+    assert captured["safe_mode"] is True
+    assert captured["seed_url"] == "https://www.xiaohongshu.com/user/profile/user-001"
+
+
+def test_cli_crawl_seed_can_disable_safe_mode(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_run_crawl_seed(_config):
+        return CrawlResult(
+            accounts=[],
+            contact_leads=[],
+            run_report=RunReport(
+                seed_url="https://www.xiaohongshu.com/user/profile/user-001",
+                attempted_accounts=0,
+                succeeded_accounts=0,
+                failed_accounts=0,
+                lead_counts={},
+                errors=[],
+            ),
+        )
+
+    class FakeStore:
+        def __init__(self, db_path):
+            captured["db_path"] = db_path
+
+        def record_crawl_result(self, result, run_type, safe_mode, started_at):
+            captured["run_type"] = run_type
+            captured["safe_mode"] = safe_mode
+            captured["seed_url"] = result.run_report.seed_url
+            captured["started_at"] = started_at
+            return 1
+
+    monkeypatch.setattr("red_crawler.cli.run_crawl_seed", fake_run_crawl_seed)
+    monkeypatch.setattr("red_crawler.cli.CrawlerStore", FakeStore)
+
+    exit_code = main(
+        [
+            "crawl-seed",
+            "--seed-url",
+            "https://www.xiaohongshu.com/user/profile/user-001",
+            "--storage-state",
+            "state.json",
+            "--no-safe-mode",
+            "--db-path",
+            str(tmp_path / "red-crawler.db"),
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
     assert captured["safe_mode"] is False
     assert captured["seed_url"] == "https://www.xiaohongshu.com/user/profile/user-001"
 
@@ -279,7 +330,7 @@ def test_cli_list_contactable_prints_table(monkeypatch, capsys):
                     account_id="user-101",
                     profile_url="https://www.xiaohongshu.com/user/profile/user-101",
                     nickname="Mia",
-                    bio_text="抗痘护肤博主",
+                    bio_text="æŠ—ç—˜æŠ¤è‚¤åšä¸»",
                     creator_segment="creator",
                     relevance_score=0.88,
                     email="mia@example.com",
@@ -309,3 +360,4 @@ def test_cli_list_contactable_prints_table(monkeypatch, capsys):
     assert exit_code == 0
     assert "user-101" in output
     assert "mia@example.com" in output
+

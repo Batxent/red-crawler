@@ -1,4 +1,4 @@
-import time
+﻿import time
 
 from red_crawler.session import (
     BrowserSession,
@@ -38,7 +38,7 @@ def test_safe_mode_controller_adds_jitter_and_backoff():
 
     class FakeRandom:
         def __init__(self):
-            self.values = iter([1.8, 2.1, 1.7, 10.0, 25.0])
+            self.values = iter([12.8, 18.4, 26.1, 140.0, 220.0])
 
         def uniform(self, _a, _b):
             return next(self.values)
@@ -56,13 +56,13 @@ def test_safe_mode_controller_adds_jitter_and_backoff():
     controller.before_request()
     controller.on_risk_event()
 
-    assert sleeps == [1.8, 2.1, 1.7, 10.0, 25.0]
+    assert sleeps == [12.8, 18.4, 26.1, 140.0, 220.0]
     assert logs == [
-        "safe-mode: sleeping 1.8s before request #1",
-        "safe-mode: sleeping 2.1s before request #2",
-        "safe-mode: sleeping 1.7s before request #3",
-        "safe-mode: taking a longer 10.0s pause after 3 requests",
-        "safe-mode: backing off for 25.0s after risk signal #1",
+        "safe-mode: sleeping 12.8s before request #1",
+        "safe-mode: sleeping 18.4s before request #2",
+        "safe-mode: sleeping 26.1s before request #3",
+        "safe-mode: taking a longer 140.0s pause after 3 requests",
+        "safe-mode: backing off for 220.0s after risk signal #1",
     ]
 
 
@@ -72,7 +72,7 @@ def test_safe_mode_controller_uses_wider_before_request_sleep_window():
     class RangeRandom:
         def uniform(self, start, end):
             recorded_ranges.append((start, end))
-            return 3.4
+            return 14.6
 
     controller = SafeModeController(
         enabled=True,
@@ -84,7 +84,7 @@ def test_safe_mode_controller_uses_wider_before_request_sleep_window():
 
     controller.before_request()
 
-    assert recorded_ranges == [(3.0, 9.0)]
+    assert recorded_ranges == [(12.0, 28.0)]
 
 
 def test_safe_mode_controller_adds_post_load_dwell_and_scroll():
@@ -94,7 +94,7 @@ def test_safe_mode_controller_adds_post_load_dwell_and_scroll():
 
     class FakeRandom:
         def __init__(self):
-            self.uniform_values = iter([4.2, 0.38, 1.4, 1.9])
+            self.uniform_values = iter([14.2, 0.44, 3.1, 5.6])
             self.random_values = iter([0.2, 0.3])
 
         def uniform(self, _start, _end):
@@ -116,16 +116,37 @@ def test_safe_mode_controller_adds_post_load_dwell_and_scroll():
 
     controller.after_page_load(FakePage(), page_kind="profile")
 
-    assert sleeps == [4.2, 1.4, 1.9]
+    assert sleeps == [14.2, 3.1, 5.6]
     assert actions == [
-        "window.scrollTo(0, document.body.scrollHeight * 0.38)",
+        "window.scrollTo(0, document.body.scrollHeight * 0.44)",
         "window.scrollTo(0, document.body.scrollHeight)",
     ]
     assert logs == [
-        "safe-mode: dwelling 4.2s on profile page",
-        "safe-mode: settling for 1.4s after partial scroll on profile page",
-        "safe-mode: settling for 1.9s after deep scroll on profile page",
+        "safe-mode: dwelling 14.2s on profile page",
+        "safe-mode: settling for 3.1s after partial scroll on profile page",
+        "safe-mode: settling for 5.6s after deep scroll on profile page",
     ]
+
+
+def test_safe_mode_controller_adds_search_scroll_settle():
+    sleeps = []
+    logs = []
+
+    class FixedRandom:
+        def uniform(self, _start, _end):
+            return 4.7
+
+    controller = SafeModeController(
+        enabled=True,
+        sleep_fn=sleeps.append,
+        log_fn=logs.append,
+        rng=FixedRandom(),
+    )
+
+    controller.after_search_scroll(round_number=2)
+
+    assert sleeps == [4.7]
+    assert logs == ["safe-mode: settling for 4.7s after search scroll #2"]
 
 
 def test_safe_mode_controller_triggers_circuit_breaker_after_repeated_risk_events():
@@ -142,9 +163,9 @@ def test_safe_mode_controller_triggers_circuit_breaker_after_repeated_risk_event
 
 
 def test_classify_high_risk_page_detects_verification_and_login_expiry():
-    assert classify_high_risk_page("请完成安全验证后继续访问") == "verification"
-    assert classify_high_risk_page("登录后查看更多内容") == "login_required"
-    assert classify_high_risk_page("正常的主页内容") is None
+    assert classify_high_risk_page("è¯·å®Œæˆå®‰å…¨éªŒè¯åŽç»§ç»­è®¿é—®") == "verification"
+    assert classify_high_risk_page("ç™»å½•åŽæŸ¥çœ‹æ›´å¤šå†…å®¹") == "login_required"
+    assert classify_high_risk_page("æ­£å¸¸çš„ä¸»é¡µå†…å®¹") is None
 
 
 def test_safe_mode_controller_logs_circuit_breaker_reason():
@@ -185,10 +206,10 @@ def test_playwright_crawler_client_caches_profile_and_search_results(monkeypatch
 
     assert client.fetch_profile_html("https://example.com/u1") == "profile:https://example.com/u1"
     assert client.fetch_profile_html("https://example.com/u1") == "profile:https://example.com/u1"
-    assert client.fetch_search_result_htmls("美妆博主") == [
+    assert client.fetch_search_result_htmls("ç¾Žå¦†åšä¸»") == [
         "search:https://www.xiaohongshu.com/search_result?keyword=%E7%BE%8E%E5%A6%86%E5%8D%9A%E4%B8%BB&source=web_explore_feed"
     ]
-    assert client.fetch_search_result_htmls("美妆博主") == [
+    assert client.fetch_search_result_htmls("ç¾Žå¦†åšä¸»") == [
         "search:https://www.xiaohongshu.com/search_result?keyword=%E7%BE%8E%E5%A6%86%E5%8D%9A%E4%B8%BB&source=web_explore_feed"
     ]
     assert calls == {"profile": 1, "search": 1}
@@ -224,7 +245,7 @@ def test_playwright_crawler_client_persists_disk_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(client, "_load_search_result_htmls", fake_load_search_result_htmls)
 
     profile_url = "https://example.com/u1"
-    query = "美妆博主"
+    query = "ç¾Žå¦†åšä¸»"
     assert client.fetch_profile_html(profile_url) == f"profile:{profile_url}"
     assert client.fetch_search_result_htmls(query) == [
         "search:https://www.xiaohongshu.com/search_result?keyword=%E7%BE%8E%E5%A6%86%E5%8D%9A%E4%B8%BB&source=web_explore_feed:1",
@@ -305,3 +326,4 @@ def test_playwright_crawler_client_expires_disk_cache_after_ttl(tmp_path, monkey
     assert stale_client.fetch_profile_html(profile_url) == f"fresh:{profile_url}"
     assert calls == {"profile": 1}
     assert "safe-mode: disk cache expired for profile" in logs
+

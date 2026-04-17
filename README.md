@@ -1,4 +1,4 @@
-# red-crawler
+﻿# red-crawler
 
 CLI crawler for collecting Xiaohongshu beauty creator contact leads from profile bios and recommendation chains, with SQLite persistence and nightly automation.
 
@@ -30,6 +30,8 @@ uv run red-crawler crawl-seed \
   --db-path "./data/red_crawler.db" \
   --output-dir "./output"
 ```
+
+`crawl-seed` defaults to safe mode, adding slower request pacing and dwell/scroll delays that look more like a normal browsing session. Use `--no-safe-mode` only if you explicitly want a faster run.
 
 `crawl-seed` now does both:
 
@@ -124,3 +126,6 @@ launchctl unload ~/Library/LaunchAgents/com.red-crawler.collect-nightly.plist 2>
 cp docs/launchd/red-crawler.collect-nightly.plist ~/Library/LaunchAgents/com.red-crawler.collect-nightly.plist
 launchctl load ~/Library/LaunchAgents/com.red-crawler.collect-nightly.plist
 ```
+
+
+

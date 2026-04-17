@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import json
@@ -40,7 +40,9 @@ def build_parser() -> argparse.ArgumentParser:
     crawl_seed.add_argument("--max-accounts", type=int, default=20)
     crawl_seed.add_argument("--max-depth", type=int, default=2)
     crawl_seed.add_argument("--include-note-recommendations", action="store_true")
-    crawl_seed.add_argument("--safe-mode", action="store_true")
+    crawl_seed.set_defaults(safe_mode=True)
+    crawl_seed.add_argument("--safe-mode", dest="safe_mode", action="store_true")
+    crawl_seed.add_argument("--no-safe-mode", dest="safe_mode", action="store_false")
     crawl_seed.add_argument("--cache-dir")
     crawl_seed.add_argument("--cache-ttl-days", type=int, default=7)
     crawl_seed.add_argument("--db-path", default="data/red_crawler.db")
@@ -265,3 +267,5 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
