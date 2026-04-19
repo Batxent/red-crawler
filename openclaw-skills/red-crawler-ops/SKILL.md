@@ -1,13 +1,19 @@
+---
+name: rednote_contacts
+description: Run the installed red-crawler CLI for Xiaohongshu contact discovery. Requires the red-crawler command and Playwright browser runtime; not instruction-only.
+homepage: https://github.com/Batxent/red-crawler
+metadata: {"openclaw":{"runtime":"python","entry":"src/index.py","instructionOnly":false,"requiresBinaries":["red-crawler"],"requiresNetwork":true,"usesBrowserAutomation":true,"sensitiveLocalFiles":["Playwright storage state JSON"],"remoteRepositoryClone":false}}
+---
+
 # red-crawler-ops
 
-Use this skill when you need to operate the `red-crawler` CLI from an OpenClaw workflow. It is the portable wrapper for the repo's existing crawler runtime, not a separate crawler implementation.
+Use this skill when you need to operate the installed `red-crawler` CLI from an OpenClaw workflow. It is the portable wrapper for the crawler runtime, not a separate crawler implementation.
 
 ## When To Use
 
 Use `red-crawler-ops` for:
 
-- installing or cloning a fresh `red-crawler` workspace
-- bootstrapping a fresh workspace into a ready-to-run state
+- preparing a local working directory for `red-crawler`
 - saving a login session into Playwright storage state
 - crawling a seed Xiaohongshu profile
 - running nightly collection against a workspace database
@@ -23,7 +29,7 @@ All crawling tasks must use the native `red-crawler` CLI commands:
 Crawl a specific Xiaohongshu user profile and extract contact information.
 
 ```bash
-uv run red-crawler crawl-seed \
+red-crawler crawl-seed \
   --seed-url "https://www.xiaohongshu.com/user/profile/USER_ID" \
   --storage-state "./state.json" \
   --max-accounts 5 \
@@ -56,7 +62,7 @@ uv run red-crawler crawl-seed \
 Interactive login to save browser session.
 
 ```bash
-uv run red-crawler login --save-state "./state.json"
+red-crawler login --save-state "./state.json"
 ```
 
 **Parameters:**
@@ -70,14 +76,14 @@ QR code-based login for headless environments.
 
 ```bash
 # Start QR login (generates QR code)
-uv run red-crawler login-qr-start \
+red-crawler login-qr-start \
   --save-state "./state.json" \
   --qr-path "./login-qr.png" \
   --session-path "./login-session.json" \
   --timeout 180
 
 # Finish QR login after user scans
-uv run red-crawler login-qr-finish \
+red-crawler login-qr-finish \
   --save-state "./state.json" \
   --session-path "./login-session.json"
 ```
@@ -87,7 +93,7 @@ uv run red-crawler login-qr-finish \
 Run scheduled nightly data collection.
 
 ```bash
-uv run red-crawler collect-nightly \
+red-crawler collect-nightly \
   --storage-state "./state.json" \
   --db-path "./data/red_crawler.db" \
   --report-dir "./reports" \
@@ -112,7 +118,7 @@ uv run red-crawler collect-nightly \
 Export weekly reports from database.
 
 ```bash
-uv run red-crawler report-weekly \
+red-crawler report-weekly \
   --db-path "./data/red_crawler.db" \
   --report-dir "./reports" \
   --days 7
@@ -134,7 +140,7 @@ uv run red-crawler report-weekly \
 List contactable creators from database.
 
 ```bash
-uv run red-crawler list-contactable \
+red-crawler list-contactable \
   --db-path "./data/red_crawler.db" \
   --lead-type "email" \
   --creator-segment "creator" \
@@ -157,12 +163,11 @@ uv run red-crawler list-contactable \
 Open Xiaohongshu in browser with saved session.
 
 ```bash
-uv run red-crawler open --storage-state "./state.json"
+red-crawler open --storage-state "./state.json"
 ```
 
 ## Supported Actions
 
-- `install_or_bootstrap`
 - `bootstrap`
 - `login`
 - `crawl_seed`
@@ -172,7 +177,7 @@ uv run red-crawler open --storage-state "./state.json"
 
 ## Example Prompts
 
-- "帮我在当前目录初始化/安装一个小红书爬虫项目" (Automatically maps to `install_or_bootstrap` to setup the workspace)
+- "帮我准备当前小红书爬虫项目的本地环境" (Automatically maps to `bootstrap` for an existing workspace)
 - "我需要登录爬虫" / "我要登录小红书" (Automatically maps to `login` to fetch/refresh the Playwright session state)
 - "开始执行每日夜间数据采集" / "运行自动收集任务" (Automatically maps to `collect_nightly` to continue crawling based on the database queue)
 - "帮我生成一份本周的爬虫数据周报" (Automatically maps to `report_weekly` pointing to the workspace's DB)
@@ -184,7 +189,7 @@ uv run red-crawler open --storage-state "./state.json"
 
 _(Also understands technical prompt variations:)_
 
-- "Bootstrap this workspace: run setup, install Chromium, and finish when `state.json` has been created."
+- "Bootstrap this workspace with `install_browser: true` after I have installed the CLI."
 - "Crawl this seed profile with a depth of 2 and write outputs into `output/`."
 - "Export this week's report and return the generated artifacts."
 
@@ -201,41 +206,18 @@ On Windows, red-crawler runs inside WSL2. You need:
    sudo apt-get update
    sudo apt-get install -y git python3 python3-pip
    ```
-4. **uv** (Python package manager):
-   ```bash
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   ```
+4. **red-crawler CLI**, installed from the published package.
 
 **Known Issues & Fixes:**
 
-1. **playwright-stealth version conflict**
-   - Error: `ImportError: cannot import name 'stealth_sync'`
-   - Fix: Lock to version `<2.0.0` in `pyproject.toml`:
-     ```toml
-     dependencies = [
-       "playwright-stealth<2.0.0",
-       ...
-     ]
-     ```
-
-2. **setuptools/pkg_resources missing**
-   - Error: `ModuleNotFoundError: No module named 'pkg_resources'`
-   - Fix: Lock to version `<70` in `pyproject.toml`:
-     ```toml
-     dependencies = [
-       "setuptools<70",
-       ...
-     ]
-     ```
-
-3. **DISPLAY not set (WSLg)**
+1. **DISPLAY not set (WSLg)**
    - Error: `Missing X server or $DISPLAY`
    - Fix: Export DISPLAY before running:
      ```bash
      export DISPLAY=:0
      ```
 
-4. **Headless vs Headed browser**
+2. **Headless vs Headed browser**
    - `login` command requires headed browser (GUI)
    - `crawl-seed` and other commands also require headed browser on WSL
    - Always set `DISPLAY=:0` before running any command with browser
@@ -247,10 +229,7 @@ On Windows, red-crawler runs inside WSL2. You need:
    sudo apt-get update
    sudo apt-get install -y git python3 python3-pip
    ```
-2. **uv**:
-   ```bash
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   ```
+2. **red-crawler CLI**, installed from the published package.
 3. **X Server** (for headed browser):
    ```bash
    sudo apt-get install -y xvfb
@@ -260,25 +239,18 @@ On Windows, red-crawler runs inside WSL2. You need:
 
 ### macOS
 
-1. **Homebrew:**
+1. **red-crawler CLI:**
    ```bash
-   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   uv tool install red-crawler==0.1.2
    ```
-2. **uv:**
-   ```bash
-   brew install uv
-   ```
-3. **Git:**
-   ```bash
-   brew install git
-   ```
+2. **Playwright browser runtime:** run `bootstrap` with `install_browser: true`.
 
 ## Prerequisites
 
-- `install_or_bootstrap` can clone the repository before setup when a workspace does not exist yet.
-- `bootstrap` and every operational action require the workspace to be the `red-crawler` repository root.
-- `git` must be available when `install_or_bootstrap` needs to clone the repository.
-- `uv` must be available for `bootstrap`, `install_or_bootstrap`, and every CLI action.
+- This skill never clones a repository. Install `red-crawler` as a package, then point `workspace_path` at a local working directory.
+- Set `require_local_checkout: true` only when you intentionally want to run from a source checkout.
+- `uv` is only required when `sync_dependencies: true` is used for a local source checkout.
+- `bootstrap` does not create a login session. Use `login` explicitly.
 - `login` creates the Playwright storage state explicitly.
 - `crawl_seed` and `collect_nightly` require an authenticated Playwright storage state file.
 - `report_weekly` and `list_contactable` run from the database and do not require storage state.
@@ -286,9 +258,9 @@ On Windows, red-crawler runs inside WSL2. You need:
 
 ## Safety Limits
 
-- Do not overwrite an existing non-`red-crawler` directory during installation.
-- Do not point this skill at a directory that lacks `pyproject.toml` unless you intend `install_or_bootstrap` to clone a fresh workspace there.
-- Do not create login sessions silently; `bootstrap` or `install_or_bootstrap` still require the user to complete interactive authentication.
+- Do not point this skill at a directory you do not control.
+- Do not create login sessions silently; call `login` only when the user asks to authenticate.
+- Keep the Playwright storage state file local and out of commits, logs, and shared artifacts.
 - Do not point it at production data or unknown databases.
 - Do not assume a browser session exists; create `state.json` with `login` first.
 - Do not hard-code machine-specific paths in prompts or config.
@@ -299,10 +271,7 @@ On Windows, red-crawler runs inside WSL2. You need:
 Provide an object with `action` plus optional fields used by the selected action. Common fields include:
 
 - `workspace_path`
-- `repo_url`
-- `workspace_parent`
-- `workspace_name`
-- `branch`
+- `require_local_checkout`
 - `runner_command`
 - `storage_state`
 - `db_path`
@@ -312,7 +281,6 @@ Provide an object with `action` plus optional fields used by the selected action
 
 Action-specific fields include:
 
-- `force_login`
 - `sync_dependencies`
 - `install_browser`
 - `seed_url`

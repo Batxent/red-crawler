@@ -15,13 +15,17 @@ from typing import Callable, List
 from urllib.parse import quote, urljoin
 
 from playwright.sync_api import BrowserContext, Page, Playwright, sync_playwright
-from playwright_stealth import stealth_sync
+from playwright_stealth import Stealth
 from browserforge.injectors.playwright import NewContext
 from browserforge.fingerprints import FingerprintGenerator, Fingerprint
 
 
 class RiskControlTriggered(RuntimeError):
     pass
+
+
+def apply_stealth(page: Page) -> None:
+    Stealth().apply_stealth_sync(page)
 
 
 HIGH_RISK_PAGE_MARKERS = {
@@ -196,7 +200,7 @@ class BrowserSession:
 
     def new_page(self) -> Page:
         page = self.context.new_page()
-        stealth_sync(page)
+        apply_stealth(page)
         return page
 
 
@@ -391,7 +395,7 @@ def save_login_storage_state(
             fingerprint=fp,
         )
         page = context.new_page()
-        stealth_sync(page)
+        apply_stealth(page)
         try:
             page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
             print("登录完成后，回到终端按回车保存 storage_state...", end="", flush=True)
@@ -443,7 +447,7 @@ def wait_for_qr_login_storage_state(
         browser = playwright.chromium.launch(headless=True)
         context = NewContext(browser, fingerprint=fp)
         page = context.new_page()
-        stealth_sync(page)
+        apply_stealth(page)
         try:
             page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(3000)
@@ -589,7 +593,7 @@ def open_xiaohongshu(
             storage_state=str(storage_state_path),
         )
         page = context.new_page()
-        stealth_sync(page)
+        apply_stealth(page)
         try:
             page.goto(open_url, wait_until="domcontentloaded", timeout=30000)
             print("浏览器已打开，回到终端按回车关闭会话...", end="", flush=True)
@@ -614,8 +618,6 @@ def extract_note_detail_urls(
         if len(note_links) >= max_results:
             break
     return note_links
-
-
 
 
 

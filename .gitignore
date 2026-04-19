@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 .worktrees/
 .cache/
+dist/
 output/
 reports/
 logs/

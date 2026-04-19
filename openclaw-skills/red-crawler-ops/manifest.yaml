@@ -2,24 +2,19 @@ name: red-crawler-ops
 version: 1.0.0
 runtime: python
 entry: src/index.py
-description: Portable OpenClaw skill for running the red-crawler CLI. Automatically parses natural language intents into appropriate actions: setup ("帮我初始化爬虫" -> install_or_bootstrap), login ("我要登录" -> login), crawling new profiles ("帮我去爬10个相关的博主 [URL]" -> crawl_seed with max_accounts), nightly collection ("执行夜间采集" -> collect_nightly), reporting ("生成本周的爬取周报" -> report_weekly), and querying existing local DB ("从数据库中找出10个美妆博主" -> list_contactable).
+description: Portable OpenClaw skill for running the installed red-crawler CLI. It can use a published CLI install by default, or an existing local checkout when explicitly requested.
+requirements:
+  binaries:
+    - red-crawler
+  network_access: required for Xiaohongshu pages and optional dependency or browser installation
+  sensitive_local_files:
+    - Playwright storage state JSON
+  remote_repository_clone: false
 config:
   workspace_path:
     type: string
     default: .
-    description: Path to the red-crawler repository root.
-  repo_url:
-    type: string
-    default: https://github.com/Batxent/red-crawler.git
-    description: Clone URL used when install_or_bootstrap needs to create a workspace.
-  workspace_parent:
-    type: string
-    default: .
-    description: Parent directory used to create a new red-crawler workspace.
-  workspace_name:
-    type: string
-    default: red-crawler
-    description: Directory name used when install_or_bootstrap creates a workspace.
+    description: Working directory for state, database, reports, and outputs.
   storage_state:
     type: string
     default: ./state.json
@@ -42,8 +37,12 @@ config:
     description: Directory for crawler cache files.
   runner_command:
     type: [string, array]
-    default: uv run red-crawler
+    default: red-crawler
     description: Command prefix used to launch the red-crawler CLI.
+  require_local_checkout:
+    type: boolean
+    default: false
+    description: Require workspace_path to be a red-crawler source checkout.
   default_crawl_budget:
     type: integer
     default: 30
@@ -64,7 +63,6 @@ input_schema:
     action:
       type: string
       enum:
-        - install_or_bootstrap
         - bootstrap
         - login
         - crawl_seed
@@ -73,28 +71,20 @@ input_schema:
         - list_contactable
     workspace_path:
       type: string
-    repo_url:
-      type: string
-    workspace_parent:
-      type: string
-    workspace_name:
-      type: string
-    branch:
-      type: string
     runner_command:
       oneOf:
         - type: string
         - type: array
           items:
             type: string
+    require_local_checkout:
+      type: boolean
     storage_state:
       type: string
     seed_url:
       type: string
     login_url:
       type: string
-    force_login:
-      type: boolean
     sync_dependencies:
       type: boolean
     install_browser:

@@ -2,10 +2,13 @@
 
 import argparse
 import json
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
+from red_crawler import __version__
 from red_crawler.export.csv_writer import export_run
 from red_crawler.nightly import (
     NightlyCollectConfig,
@@ -22,16 +25,17 @@ from red_crawler.session import (
 from red_crawler.store import CrawlerStore
 
 
-
-
 def _default_login_qr_path(save_state: str) -> Path:
     return Path(save_state).with_suffix(".login-qr.png")
 
 
 def _default_login_session_path(save_state: str) -> Path:
     return Path(save_state).with_suffix(".login-session.json")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="red-crawler")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     crawl_seed = subparsers.add_parser("crawl-seed")
@@ -72,6 +76,8 @@ def build_parser() -> argparse.ArgumentParser:
     open_page = subparsers.add_parser("open")
     open_page.add_argument("--storage-state", required=True)
     open_page.add_argument("--open-url", default="https://www.xiaohongshu.com")
+
+    subparsers.add_parser("install-browsers")
 
     collect_nightly = subparsers.add_parser("collect-nightly")
     collect_nightly.add_argument("--storage-state", required=True)
@@ -171,6 +177,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
 
+    if args.command == "install-browsers":
+        return subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            check=False,
+        ).returncode
+
     if args.command == "collect-nightly":
         config = NightlyCollectConfig(
             storage_state=args.storage_state,
@@ -267,5 +279,3 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-

@@ -1,9 +1,40 @@
 ﻿import csv
 import json
 
+import pytest
+
 from red_crawler.cli import main
 from red_crawler.models import AccountRecord, ContactLead, CrawlResult, RunReport
 from red_crawler.store import ContactableCreator
+
+
+def test_cli_version(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["--version"])
+
+    assert exc.value.code == 0
+    assert "red-crawler 0.1.2" in capsys.readouterr().out
+
+
+def test_cli_install_browsers_runs_playwright_install(monkeypatch):
+    captured = {}
+
+    class Completed:
+        returncode = 0
+
+    def fake_run(argv, check):
+        captured["argv"] = argv
+        captured["check"] = check
+        return Completed()
+
+    monkeypatch.setattr("red_crawler.cli.subprocess.run", fake_run)
+    monkeypatch.setattr("red_crawler.cli.sys.executable", "/tmp/python")
+
+    assert main(["install-browsers"]) == 0
+    assert captured == {
+        "argv": ["/tmp/python", "-m", "playwright", "install", "chromium"],
+        "check": False,
+    }
 
 
 def test_cli_crawl_seed_exports_expected_files(tmp_path, monkeypatch):
@@ -360,4 +391,3 @@ def test_cli_list_contactable_prints_table(monkeypatch, capsys):
     assert exit_code == 0
     assert "user-101" in output
     assert "mia@example.com" in output
-

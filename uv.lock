@@ -353,7 +353,7 @@ wheels = [
 
 [[package]]
 name = "red-crawler"
-version = "0.1.0"
+version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -371,9 +371,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.13.3" },
-    { name = "browserforge" },
+    { name = "browserforge", specifier = ">=1.2.4" },
     { name = "playwright", specifier = ">=1.52.0" },
-    { name = "playwright-stealth" },
+    { name = "playwright-stealth", specifier = ">=2.0.3,<3.0.0" },
 ]
 
 [package.metadata.requires-dev]

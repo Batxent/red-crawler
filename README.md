@@ -4,7 +4,19 @@ CLI crawler for collecting Xiaohongshu beauty creator contact leads from profile
 
 ## Usage
 
-Install dependencies and Playwright browser runtime:
+Install the published CLI:
+
+```bash
+uv tool install red-crawler==0.1.2
+```
+
+Install the Playwright browser runtime:
+
+```bash
+red-crawler install-browsers
+```
+
+For local development from a checkout:
 
 ```bash
 uv sync
@@ -14,7 +26,7 @@ uv run playwright install chromium
 Save a reusable login session first:
 
 ```bash
-uv run red-crawler login --save-state "./state.json"
+red-crawler login --save-state "./state.json"
 ```
 
 It will open a visible browser. Log in to Xiaohongshu there, then come back to the terminal and press Enter to save the session file.
@@ -22,7 +34,7 @@ It will open a visible browser. Log in to Xiaohongshu there, then come back to t
 Run a manual crawl with an existing Playwright storage state file:
 
 ```bash
-uv run red-crawler crawl-seed \
+red-crawler crawl-seed \
   --seed-url "https://www.xiaohongshu.com/user/profile/USER_ID" \
   --storage-state "./state.json" \
   --max-accounts 20 \
@@ -41,7 +53,7 @@ uv run red-crawler crawl-seed \
 Optional note-page expansion:
 
 ```bash
-uv run red-crawler crawl-seed \
+red-crawler crawl-seed \
   --seed-url "https://www.xiaohongshu.com/user/profile/USER_ID" \
   --storage-state "./state.json" \
   --include-note-recommendations
@@ -50,7 +62,7 @@ uv run red-crawler crawl-seed \
 List high-quality contactable creators from the SQLite database:
 
 ```bash
-uv run red-crawler list-contactable \
+red-crawler list-contactable \
   --db-path "./data/red_crawler.db" \
   --min-relevance-score 0.7 \
   --limit 20
@@ -59,7 +71,7 @@ uv run red-crawler list-contactable \
 Run nightly auto-collection with queue, search bootstrap, seed promotion, and daily report output:
 
 ```bash
-uv run red-crawler collect-nightly \
+red-crawler collect-nightly \
   --storage-state "./state.json" \
   --db-path "./data/red_crawler.db" \
   --report-dir "./reports" \
@@ -70,7 +82,7 @@ uv run red-crawler collect-nightly \
 Export weekly growth report and a contactable creator CSV:
 
 ```bash
-uv run red-crawler report-weekly \
+red-crawler report-weekly \
   --db-path "./data/red_crawler.db" \
   --report-dir "./reports" \
   --days 7
@@ -97,13 +109,22 @@ To install it from a local path, point OpenClaw at that folder, or copy the skil
 
 Use the OpenClaw skill actions in this order:
 
-- `install_or_bootstrap` can clone the repository into a target directory, run `uv sync`, install Chromium, and keep going until `state.json` exists.
-- `bootstrap` can initialize the workspace, install Chromium, and keep going until `state.json` exists.
+- `bootstrap` validates a local working directory and can run Chromium installation when explicitly requested.
 - `login` creates the Playwright storage state explicitly.
 - `crawl_seed` and `collect_nightly` require an authenticated Playwright storage state file.
 - `report_weekly` and `list_contactable` run from the SQLite database and do not require `--storage-state`.
 
-`install_or_bootstrap` is the lowest-dependency entrypoint. A new user only needs `git`, `uv`, and a machine that can run Playwright Chromium; the skill can handle cloning the repo, syncing Python dependencies, installing Chromium, and starting the interactive login flow.
+The skill does not clone repositories or create login sessions implicitly. Install the `red-crawler` CLI package first, point `workspace_path` at a local working directory, run `bootstrap` only for reviewed local setup steps, then run `login` when you are ready to create `state.json`.
+
+## Publishing
+
+The package builds as a standard Python wheel and source distribution:
+
+```bash
+uv build
+```
+
+See [docs/publishing.md](/Users/tommy/Documents/GitHubOpenSources/red-crawler/docs/publishing.md) for the release checklist and PyPI/TestPyPI commands.
 
 ## launchd
 
@@ -126,6 +147,3 @@ launchctl unload ~/Library/LaunchAgents/com.red-crawler.collect-nightly.plist 2>
 cp docs/launchd/red-crawler.collect-nightly.plist ~/Library/LaunchAgents/com.red-crawler.collect-nightly.plist
 launchctl load ~/Library/LaunchAgents/com.red-crawler.collect-nightly.plist
 ```
-
-
-

@@ -1,13 +1,30 @@
 ﻿import time
 
+import red_crawler.session as session_module
 from red_crawler.session import (
     BrowserSession,
+    apply_stealth,
     classify_high_risk_page,
     PlaywrightCrawlerClient,
     RiskControlTriggered,
     SafeModeController,
     extract_note_detail_urls,
 )
+
+
+def test_apply_stealth_uses_stealth_api(monkeypatch):
+    calls = []
+
+    class FakeStealth:
+        def apply_stealth_sync(self, page):
+            calls.append(page)
+
+    monkeypatch.setattr(session_module, "Stealth", FakeStealth)
+
+    page = object()
+    apply_stealth(page)
+
+    assert calls == [page]
 
 
 def test_extract_note_detail_urls_prefers_profile_note_routes():
@@ -163,9 +180,9 @@ def test_safe_mode_controller_triggers_circuit_breaker_after_repeated_risk_event
 
 
 def test_classify_high_risk_page_detects_verification_and_login_expiry():
-    assert classify_high_risk_page("è¯·å®Œæˆå®‰å…¨éªŒè¯åŽç»§ç»­è®¿é—®") == "verification"
-    assert classify_high_risk_page("ç™»å½•åŽæŸ¥çœ‹æ›´å¤šå†…å®¹") == "login_required"
-    assert classify_high_risk_page("æ­£å¸¸çš„ä¸»é¡µå†…å®¹") is None
+    assert classify_high_risk_page("请完成安全验证后继续访问") == "verification"
+    assert classify_high_risk_page("登录后查看更多内容") == "login_required"
+    assert classify_high_risk_page("正常的主页内容") is None
 
 
 def test_safe_mode_controller_logs_circuit_breaker_reason():
@@ -206,10 +223,10 @@ def test_playwright_crawler_client_caches_profile_and_search_results(monkeypatch
 
     assert client.fetch_profile_html("https://example.com/u1") == "profile:https://example.com/u1"
     assert client.fetch_profile_html("https://example.com/u1") == "profile:https://example.com/u1"
-    assert client.fetch_search_result_htmls("ç¾Žå¦†åšä¸»") == [
+    assert client.fetch_search_result_htmls("美妆博主") == [
         "search:https://www.xiaohongshu.com/search_result?keyword=%E7%BE%8E%E5%A6%86%E5%8D%9A%E4%B8%BB&source=web_explore_feed"
     ]
-    assert client.fetch_search_result_htmls("ç¾Žå¦†åšä¸»") == [
+    assert client.fetch_search_result_htmls("美妆博主") == [
         "search:https://www.xiaohongshu.com/search_result?keyword=%E7%BE%8E%E5%A6%86%E5%8D%9A%E4%B8%BB&source=web_explore_feed"
     ]
     assert calls == {"profile": 1, "search": 1}
@@ -245,7 +262,7 @@ def test_playwright_crawler_client_persists_disk_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(client, "_load_search_result_htmls", fake_load_search_result_htmls)
 
     profile_url = "https://example.com/u1"
-    query = "ç¾Žå¦†åšä¸»"
+    query = "美妆博主"
     assert client.fetch_profile_html(profile_url) == f"profile:{profile_url}"
     assert client.fetch_search_result_htmls(query) == [
         "search:https://www.xiaohongshu.com/search_result?keyword=%E7%BE%8E%E5%A6%86%E5%8D%9A%E4%B8%BB&source=web_explore_feed:1",
@@ -326,4 +343,3 @@ def test_playwright_crawler_client_expires_disk_cache_after_ttl(tmp_path, monkey
     assert stale_client.fetch_profile_html(profile_url) == f"fresh:{profile_url}"
     assert calls == {"profile": 1}
     assert "safe-mode: disk cache expired for profile" in logs
-

@@ -1,15 +1,13 @@
 workspace_path: .
-repo_url: https://github.com/Batxent/red-crawler.git
-workspace_parent: .
-workspace_name: red-crawler
+require_local_checkout: false
 storage_state: ./state.json
 db_path: ./data/red_crawler.db
 report_dir: ./reports
 output_dir: ./output
 cache_dir: ./.cache/red-crawler
+sync_dependencies: false
+install_browser: false
 runner_command:
-  - uv
-  - run
   - red-crawler
 default_crawl_budget: 30
 default_report_days: 7

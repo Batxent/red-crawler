@@ -4,16 +4,28 @@ build-backend = "hatchling.build"
 
 [project]
 name = "red-crawler"
-version = "0.1.0"
+version = "0.1.2"
 description = "Xiaohongshu contact lead crawler for fashion creators"
 readme = "README.md"
 requires-python = ">=3.9"
+keywords = ["xiaohongshu", "rednote", "crawler", "playwright", "contacts"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Internet :: WWW/HTTP :: Browsers",
+]
 dependencies = [
   "beautifulsoup4>=4.13.3",
   "playwright>=1.52.0",
-  "playwright-stealth",
+  "playwright-stealth>=2.0.3,<3.0.0",
   "browserforge>=1.2.4",
-  "setuptools>=80.0.1"
 ]
 
 [dependency-groups]
@@ -24,8 +36,21 @@ dev = [
 [project.scripts]
 red-crawler = "red_crawler.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/Batxent/red-crawler"
+Repository = "https://github.com/Batxent/red-crawler"
+Issues = "https://github.com/Batxent/red-crawler/issues"
+
 [tool.pytest.ini_options]
 testpaths = ["tests", "openclaw-skills"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/red_crawler"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/README.md",
+  "/pyproject.toml",
+  "/src",
+  "/tests",
+]

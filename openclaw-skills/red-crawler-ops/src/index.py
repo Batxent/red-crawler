@@ -9,7 +9,6 @@ from collections.abc import Sequence
 
 KNOWN_ACTIONS = {
     "bootstrap",
-    "install_or_bootstrap",
     "login",
     "crawl_seed",
     "collect_nightly",
@@ -42,8 +41,6 @@ CLI_ARTIFACT_DEFAULTS = {
     "report_weekly": "reports",
 }
 
-WORKSPACE_DEFAULT_PATH = "."
-WORKSPACE_DEFAULT_NAME = "red-crawler"
 EXPECTED_PROJECT_NAME = "red-crawler"
 
 
@@ -88,13 +85,13 @@ def _display_command(argv):
 def _get_runner_command(resolved):
     runner_command = resolved.get("runner_command")
     if runner_command is None:
-        return ["uv", "run", "red-crawler"]
+        return ["red-crawler"]
     if isinstance(runner_command, str):
         parts = shlex.split(runner_command)
-        return parts if parts else ["uv", "run", "red-crawler"]
+        return parts if parts else ["red-crawler"]
     if isinstance(runner_command, Sequence):
         return [str(part) for part in runner_command]
-    return ["uv", "run", "red-crawler"]
+    return ["red-crawler"]
 
 
 def _extend_flag(argv, flag, value):
@@ -266,7 +263,7 @@ def validate_request(resolved):
             "validation_error",
             f"Unsupported action: {resolved.get('action')}",
             (
-                "Use one of: install_or_bootstrap, bootstrap, login, crawl_seed, "
+                "Use one of: bootstrap, login, crawl_seed, "
                 "collect_nightly, report_weekly, list_contactable."
             ),
         )
@@ -286,7 +283,7 @@ def validate_request(resolved):
             "Provide workspace_path directly or set it in context.config.",
         )
 
-    if action in {"bootstrap", "login", "crawl_seed", "collect_nightly"} and not resolved.get(
+    if action in {"login", "crawl_seed", "collect_nightly"} and not resolved.get(
         "storage_state"
     ):
         return structured_error(
@@ -301,203 +298,53 @@ def validate_request(resolved):
         return structured_error(
             "configuration_error",
             "workspace_path must be a path-like value.",
-            "Provide workspace_path as a string or Path to the red-crawler repository root.",
+            "Provide workspace_path as a string or Path to the red-crawler working directory.",
         )
-    if not _is_red_crawler_workspace(workspace):
+    if not workspace.exists() or not workspace.is_dir():
+        return structured_error(
+            "configuration_error",
+            f"workspace_path must be an existing directory: {workspace}",
+            "Create a working directory for state, database, reports, and outputs, then rerun the action.",
+        )
+
+    needs_local_checkout = (
+        resolved.get("require_local_checkout") is True
+        or resolved.get("sync_dependencies") is True
+    )
+    if needs_local_checkout and not _is_red_crawler_workspace(workspace):
         return structured_error(
             "configuration_error",
             (
                 "workspace_path must be a red-crawler repository root with "
                 f"pyproject.toml name = '{EXPECTED_PROJECT_NAME}': {workspace}"
             ),
-            "Point workspace_path at the red-crawler repository root with pyproject.toml name = 'red-crawler'.",
+            "Point workspace_path at a red-crawler checkout, or install the published CLI and disable local-checkout-only setup.",
         )
+
+    if action in {"crawl_seed", "collect_nightly"}:
+        state_path = _resolve_workspace_path_value(resolved["storage_state"], resolved)
+        if not state_path.exists():
+            return structured_error(
+                "configuration_error",
+                f"storage_state file does not exist: {state_path}",
+                "Run login first and keep the Playwright storage state file local.",
+            )
 
     return {"status": "ok", "action": action, "resolved": resolved}
 
 
-def _resolve_install_workspace(resolved):
-    workspace_path = resolved.get("workspace_path")
-    if workspace_path:
-        workspace = Path(workspace_path).expanduser().resolve()
-        if workspace.exists() and _is_red_crawler_workspace(workspace):
-            return workspace
-        if str(workspace_path).strip() not in {WORKSPACE_DEFAULT_PATH, "./"}:
-            return workspace
-
-    workspace_parent = resolved.get("workspace_parent", WORKSPACE_DEFAULT_PATH)
-    workspace_name = resolved.get("workspace_name", WORKSPACE_DEFAULT_NAME)
-    return (Path(workspace_parent) / str(workspace_name)).expanduser().resolve()
-
-
-def _install_or_bootstrap_result(resolved):
-    try:
-        workspace = _resolve_install_workspace(resolved)
-    except (TypeError, ValueError):
-        return structured_error(
-            "configuration_error",
-            "workspace_path must be a path-like value.",
-            (
-                "Provide workspace_path directly or set workspace_parent and "
-                "workspace_name to path-like values."
-            ),
-        )
-
-    repo_url = resolved.get("repo_url")
-    if not repo_url:
-        return structured_error(
-            "configuration_error",
-            "repo_url is required for install_or_bootstrap.",
-            "Provide a git clone URL for the red-crawler repository.",
-        )
-
-    command_displays = []
-    repo_cloned = False
-
-    if workspace.exists():
-        if not workspace.is_dir():
-            return structured_error(
-                "configuration_error",
-                f"workspace_path already exists and is not a directory: {workspace}",
-                "Point workspace_path at a directory or choose a different target path.",
-            )
-        if not _is_red_crawler_workspace(workspace):
-            return structured_error(
-                "configuration_error",
-                (
-                    "workspace_path must be a red-crawler repository root with "
-                    f"pyproject.toml name = '{EXPECTED_PROJECT_NAME}': {workspace}"
-                ),
-                (
-                    "Point workspace_path at a red-crawler repository root or "
-                    "remove the conflicting directory before rerunning "
-                    "install_or_bootstrap."
-                ),
-            )
-    else:
-        clone_command = ["git", "clone"]
-        if resolved.get("branch"):
-            clone_command.extend(["--branch", str(resolved["branch"])])
-        clone_command.extend([str(repo_url), str(workspace)])
-        command_displays.append(_display_command(clone_command))
-
-        workspace.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            completed = run_command(clone_command, cwd=workspace.parent)
-        except OSError as exc:
-            return {
-                "status": "error",
-                "action": "install_or_bootstrap",
-                "error_type": "execution_error",
-                "message": f"install_or_bootstrap failed to start: {exc}.",
-                "command": command_displays[-1],
-                "stdout": "",
-                "stderr": "",
-                "suggested_fix": (
-                    "Verify git is installed and available from the current "
-                    "environment, then rerun install_or_bootstrap."
-                ),
-            }
-
-        if completed.returncode != 0:
-            return {
-                "status": "error",
-                "action": "install_or_bootstrap",
-                "error_type": "execution_error",
-                "message": (
-                    "install_or_bootstrap failed while cloning the repository "
-                    f"with exit code {completed.returncode}."
-                ),
-                "command": command_displays[-1],
-                "stdout": completed.stdout,
-                "stderr": completed.stderr,
-                "suggested_fix": (
-                    "Inspect stderr, verify repo_url and network access, and rerun "
-                    "install_or_bootstrap."
-                ),
-            }
-
-        if not _is_red_crawler_workspace(workspace):
-            return {
-                "status": "error",
-                "action": "install_or_bootstrap",
-                "error_type": "artifact_error",
-                "message": (
-                    "install_or_bootstrap cloned the repository but the target "
-                    "workspace is not a valid red-crawler repository."
-                ),
-                "command": command_displays[-1],
-                "stdout": completed.stdout,
-                "stderr": completed.stderr,
-                "suggested_fix": (
-                    "Verify repo_url points at the red-crawler repository with "
-                    "project.name = 'red-crawler', then rerun install_or_bootstrap."
-                ),
-            }
-        repo_cloned = True
-
-    bootstrap_resolved = dict(resolved)
-    bootstrap_resolved["action"] = "bootstrap"
-    bootstrap_resolved["workspace_path"] = str(workspace)
-
-    validation = validate_request(bootstrap_resolved)
-    if validation["status"] == "error":
-        return validation
-
-    bootstrap_result = _bootstrap_result(validation["resolved"])
-    if bootstrap_result["status"] == "error":
-        result = dict(bootstrap_result)
-        result["action"] = "install_or_bootstrap"
-        if command_displays:
-            bootstrap_command = result.get("command", "")
-            result["command"] = " && ".join(
-                part for part in [*command_displays, bootstrap_command] if part
-            )
-        return result
-
-    artifacts = dict(bootstrap_result.get("artifacts", {}))
-    artifacts["workspace_path"] = str(workspace)
-
-    metrics = dict(bootstrap_result.get("metrics", {}))
-    metrics["repo_cloned"] = repo_cloned
-    ordered_metrics = {
-        "repo_cloned": metrics.get("repo_cloned", False),
-        "uv_sync_ran": metrics.get("uv_sync_ran", False),
-        "playwright_install_ran": metrics.get("playwright_install_ran", False),
-        "login_ran": metrics.get("login_ran", False),
-        "state_file_created": metrics.get("state_file_created", False),
-    }
-
-    command_parts = [*command_displays, bootstrap_result.get("command", "")]
-    return {
-        "status": "success",
-        "action": "install_or_bootstrap",
-        "command": " && ".join(part for part in command_parts if part),
-        "artifacts": artifacts,
-        "metrics": ordered_metrics,
-        "next_step": "You can now run crawl_seed or collect_nightly.",
-        "summary": "install_or_bootstrap completed successfully.",
-        "stdout": "",
-        "stderr": "",
-    }
-
-
 def _bootstrap_commands(resolved):
     commands = []
-    if resolved.get("sync_dependencies", True):
+    if resolved.get("sync_dependencies") is True:
         commands.append(["uv", "sync"])
-    if resolved.get("install_browser", True):
-        commands.append(["uv", "run", "playwright", "install", "chromium"])
+    if resolved.get("install_browser") is True:
+        commands.append(_get_runner_command(resolved) + ["install-browsers"])
 
-    state_path = _resolve_workspace_path_value(resolved["storage_state"], resolved)
-    if resolved.get("force_login", False) or not state_path.exists():
-        commands.append(build_login_command(resolved))
-
-    return commands, state_path
+    return commands
 
 
 def _bootstrap_result(resolved):
-    commands, state_path = _bootstrap_commands(resolved)
+    commands = _bootstrap_commands(resolved)
     command_displays = []
 
     for command in commands:
@@ -537,37 +384,17 @@ def _bootstrap_result(resolved):
                 ),
             }
 
-    if not state_path.exists():
-        return {
-            "status": "error",
-            "action": "bootstrap",
-            "error_type": "artifact_error",
-            "message": (
-                f"bootstrap completed but missing required artifact: {state_path.name}."
-            ),
-            "command": " && ".join(command_displays),
-            "stdout": "",
-            "stderr": "",
-            "suggested_fix": (
-                "Complete the interactive login flow and ensure the storage_state "
-                "file is written before rerunning bootstrap."
-            ),
-        }
-
-    login_command = build_login_command(resolved)
     metrics = {
-        "uv_sync_ran": resolved.get("sync_dependencies", True),
-        "playwright_install_ran": resolved.get("install_browser", True),
-        "login_ran": login_command in commands,
-        "state_file_created": state_path.exists(),
+        "uv_sync_ran": resolved.get("sync_dependencies") is True,
+        "playwright_install_ran": resolved.get("install_browser") is True,
     }
     return {
         "status": "success",
         "action": "bootstrap",
         "command": " && ".join(command_displays),
-        "artifacts": {state_path.name: str(state_path)},
+        "artifacts": {"workspace_path": str(_workspace_root(resolved))},
         "metrics": metrics,
-        "next_step": "You can now run crawl_seed or collect_nightly.",
+        "next_step": "Run login to create a local Playwright storage state before crawling.",
         "summary": "bootstrap completed successfully.",
         "stdout": "",
         "stderr": "",
@@ -578,10 +405,6 @@ async def handler(input, context):
     resolved = merge_config(input, context or {})
     if isinstance(resolved, dict) and resolved.get("status") == "error":
         return resolved
-    normalized_action = str(resolved.get("action", "")).strip().lower()
-    if normalized_action == "install_or_bootstrap":
-        resolved["action"] = normalized_action
-        return _install_or_bootstrap_result(resolved)
     validation = validate_request(resolved)
     if validation["status"] == "error":
         return validation
