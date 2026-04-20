@@ -87,6 +87,58 @@ def test_run_crawl_seed_collects_accounts_leads_and_failures():
     ]
 
 
+def test_run_crawl_seed_filters_successful_accounts_by_gender():
+    pages = {
+        "https://www.xiaohongshu.com/user/profile/user-001": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-001</div>
+          <h1 class="user-name">Seed</h1>
+          <div class="user-bio">女生穿搭分享 vx: seed_studio</div>
+        </section>
+        <section class="recommend-users">
+          <a class="recommended-user" data-user-id="user-002" href="/user/profile/user-002">
+            <span class="nickname">U2</span>
+          </a>
+          <a class="recommended-user" data-user-id="user-003" href="/user/profile/user-003">
+            <span class="nickname">U3</span>
+          </a>
+        </section>
+        """,
+        "https://www.xiaohongshu.com/user/profile/user-002": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-002</div>
+          <h1 class="user-name">U2</h1>
+          <div class="user-bio">男生护肤 邮箱：u2@example.com</div>
+        </section>
+        """,
+        "https://www.xiaohongshu.com/user/profile/user-003": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-003</div>
+          <h1 class="user-name">U3</h1>
+          <div class="user-bio">女生护肤 邮箱：u3@example.com</div>
+        </section>
+        """,
+    }
+    client = FakeClient(pages=pages)
+    config = CrawlConfig(
+        seed_url="https://www.xiaohongshu.com/user/profile/user-001",
+        storage_state="state.json",
+        output_dir="out",
+        max_accounts=5,
+        max_depth=1,
+        include_note_recommendations=False,
+        gender_filter="男",
+    )
+
+    result = run_crawl_seed_with_client(config, client)
+
+    assert [account.account_id for account in result.accounts] == ["user-002"]
+    assert result.accounts[0].visible_metadata["gender"] == "male"
+    assert [lead.account_id for lead in result.contact_leads] == ["user-002"]
+    assert result.run_report.succeeded_accounts == 1
+    assert result.run_report.lead_counts == {"email": 1}
+
+
 def test_run_crawl_seed_marks_shell_error_page_as_failed():
     client = FakeClient(
         pages={

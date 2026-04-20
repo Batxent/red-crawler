@@ -44,6 +44,7 @@ def test_cli_crawl_seed_exports_expected_files(tmp_path, monkeypatch):
         assert config.safe_mode is True
         assert config.cache_dir == str(tmp_path / "cache")
         assert config.cache_ttl_days == 7
+        assert config.gender_filter == "女"
         return CrawlResult(
             accounts=[
                 AccountRecord(
@@ -92,6 +93,8 @@ def test_cli_crawl_seed_exports_expected_files(tmp_path, monkeypatch):
             "--safe-mode",
             "--cache-dir",
             str(tmp_path / "cache"),
+            "--gender-filter",
+            "女",
             "--output-dir",
             str(tmp_path),
         ]

@@ -41,6 +41,44 @@ class CrawlConfig:
     safe_mode: bool = False
     cache_dir: str | None = None
     cache_ttl_days: int = 7
+    gender_filter: str | None = None
+
+
+def _normalize_gender_filter(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"", "all", "any", "全部", "不限"}:
+        return None
+    if normalized in {"male", "m", "man", "men", "男", "男性", "男生", "男的"}:
+        return "male"
+    if normalized in {"female", "f", "woman", "women", "女", "女性", "女生", "女的"}:
+        return "female"
+    raise ValueError("gender_filter must be one of: male, female, 男, 女")
+
+
+def _infer_gender(account: AccountRecord) -> str | None:
+    tags = account.visible_metadata.get("tags", [])
+    tag_text = " ".join(str(tag) for tag in tags) if isinstance(tags, list) else str(tags)
+    text = f"{account.nickname} {account.bio_text} {tag_text}"
+    female_markers = ("女生", "女孩", "女博主", "女性", "姐妹", "宝妈", "辣妈", "妈妈")
+    male_markers = ("男生", "男孩", "男博主", "男性", "型男", "男士")
+    female_score = sum(marker in text for marker in female_markers)
+    male_score = sum(marker in text for marker in male_markers)
+    if female_score > male_score:
+        return "female"
+    if male_score > female_score:
+        return "male"
+    return None
+
+
+def _matches_gender_filter(account: AccountRecord, gender_filter: str | None) -> bool:
+    if gender_filter is None:
+        return True
+    inferred_gender = _infer_gender(account)
+    if inferred_gender:
+        account.visible_metadata["gender"] = inferred_gender
+    return inferred_gender == gender_filter
 
 
 def run_crawl_seed(config: CrawlConfig) -> CrawlResult:
@@ -57,6 +95,7 @@ def run_crawl_seed(config: CrawlConfig) -> CrawlResult:
 def run_crawl_seed_with_client(
     config: CrawlConfig, client: CrawlClient
 ) -> CrawlResult:
+    gender_filter = _normalize_gender_filter(config.gender_filter)
     queue: Deque[Tuple[str, int, str, Optional[str]]] = deque(
         [(config.seed_url, 0, "seed", None)]
     )
@@ -66,6 +105,7 @@ def run_crawl_seed_with_client(
     errors: list[dict[str, str]] = []
     aborted = False
     abort_reason: str | None = None
+    seed_reference_payload: Dict[str, object] | None = None
 
     while queue and len(accounts) < config.max_accounts:
         profile_url, depth, source_type, source_from = queue.popleft()
@@ -85,14 +125,21 @@ def run_crawl_seed_with_client(
                     "visible_metadata": account.visible_metadata,
                 }
             )
+            if source_type == "seed":
+                seed_reference_payload = {
+                    "nickname": account.nickname,
+                    "bio_text": account.bio_text,
+                    "visible_metadata": account.visible_metadata,
+                }
             account.relevance_score = 1.0 if source_type == "seed" else 0.0
-            accounts.append(account)
-            contact_leads.extend(
-                extract_contact_leads(
-                    account_id=account.account_id,
-                    bio_text=account.bio_text,
+            if _matches_gender_filter(account, gender_filter):
+                accounts.append(account)
+                contact_leads.extend(
+                    extract_contact_leads(
+                        account_id=account.account_id,
+                        bio_text=account.bio_text,
+                    )
                 )
-            )
         except RiskControlTriggered as exc:
             aborted = True
             abort_reason = str(exc)
@@ -232,7 +279,7 @@ def run_crawl_seed_with_client(
     failed_accounts = sum(1 for account in accounts if account.crawl_status != "success")
 
     if accounts:
-        seed_payload = {
+        seed_payload = seed_reference_payload or {
             "nickname": accounts[0].nickname,
             "bio_text": accounts[0].bio_text,
             "visible_metadata": accounts[0].visible_metadata,

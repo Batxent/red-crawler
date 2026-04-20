@@ -125,6 +125,7 @@ def build_crawl_seed_command(resolved):
     _extend_bool_flag(argv, "--safe-mode", resolved.get("safe_mode"))
     _extend_flag(argv, "--cache-dir", resolved.get("cache_dir"))
     _extend_flag(argv, "--cache-ttl-days", resolved.get("cache_ttl_days"))
+    _extend_flag(argv, "--gender-filter", resolved.get("gender_filter"))
     _extend_flag(argv, "--db-path", resolved.get("db_path"))
     _extend_flag(argv, "--output-dir", resolved.get("output_dir"))
     return argv

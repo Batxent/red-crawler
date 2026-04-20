@@ -39,11 +39,14 @@ red-crawler crawl-seed \
   --storage-state "./state.json" \
   --max-accounts 20 \
   --max-depth 2 \
+  --gender-filter "女" \
   --db-path "./data/red_crawler.db" \
   --output-dir "./output"
 ```
 
 `crawl-seed` defaults to safe mode, adding slower request pacing and dwell/scroll delays that look more like a normal browsing session. Use `--no-safe-mode` only if you explicitly want a faster run.
+
+Use `--gender-filter "男"` or `--gender-filter "女"` to keep only inferred male or female accounts in the exported and persisted crawl results.
 
 `crawl-seed` now does both:
 

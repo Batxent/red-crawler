@@ -290,6 +290,7 @@ Action-specific fields include:
 - `include_note_recommendations`
 - `safe_mode`
 - `cache_ttl_days`
+- `gender_filter` (`male`/`female` or `男`/`女`)
 - `crawl_budget`
 - `search_term_limit`
 - `startup_jitter_minutes`
