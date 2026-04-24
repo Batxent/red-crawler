@@ -137,6 +137,95 @@ def test_store_merges_contact_leads_and_preserves_observations(tmp_path):
     assert observation_count == 2
 
 
+def test_store_list_contactable_creators_dedupes_historical_profile_url_variants(tmp_path):
+    db_path = tmp_path / "red-crawler.db"
+    store = CrawlerStore(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            insert into creator_accounts (
+                account_id, profile_url, nickname, bio_text, visible_metadata_json,
+                creator_segment, relevance_score, first_seen_at, last_seen_at,
+                last_crawl_status, last_crawl_error
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "63184102000000001103a3e7",
+                "https://www.xiaohongshu.com/user/profile/user-101/63184102000000001103a3e7?xsec_token=abc&xsec_source=pc_user",
+                "Mia",
+                "护肤博主",
+                "{}",
+                "creator",
+                0.72,
+                "2026-03-20T01:00:00+00:00",
+                "2026-03-20T01:00:00+00:00",
+                "success",
+                None,
+            ),
+        )
+        conn.execute(
+            """
+            insert into creator_accounts (
+                account_id, profile_url, nickname, bio_text, visible_metadata_json,
+                creator_segment, relevance_score, first_seen_at, last_seen_at,
+                last_crawl_status, last_crawl_error
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "user-101",
+                "https://www.xiaohongshu.com/user/profile/user-101?xsec_source=pc_search",
+                "Mia",
+                "护肤博主",
+                "{}",
+                "creator",
+                0.88,
+                "2026-03-29T01:00:00+00:00",
+                "2026-03-29T01:00:00+00:00",
+                "success",
+                None,
+            ),
+        )
+        conn.executemany(
+            """
+            insert into contact_leads (
+                account_id, lead_type, normalized_value, source_field, best_confidence,
+                latest_raw_snippet, latest_extractor_name, first_seen_at, last_seen_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "63184102000000001103a3e7",
+                    "email",
+                    "mia@example.com",
+                    "bio",
+                    0.93,
+                    "mia@example.com",
+                    "email_regex",
+                    "2026-03-20T01:00:00+00:00",
+                    "2026-03-20T01:00:00+00:00",
+                ),
+                (
+                    "user-101",
+                    "email",
+                    "mia@example.com",
+                    "bio",
+                    0.97,
+                    "mia@example.com",
+                    "email_regex",
+                    "2026-03-29T01:00:00+00:00",
+                    "2026-03-29T01:00:00+00:00",
+                ),
+            ],
+        )
+
+    creators = store.list_contactable_creators(limit=10)
+
+    assert len(creators) == 1
+    assert creators[0].account_id == "user-101"
+    assert creators[0].email == "mia@example.com"
+
+
 def test_store_weekly_growth_counts_first_email_hit_once_per_creator(tmp_path):
     db_path = tmp_path / "red-crawler.db"
     store = CrawlerStore(db_path)
@@ -215,3 +304,90 @@ def test_store_dequeues_discovery_queue_by_priority(tmp_path):
     items = store.dequeue_discovery_candidates(limit=2, now=now)
 
     assert [item.account_id for item in items] == ["user-high", "user-low"]
+
+
+def test_store_dedupes_discovery_queue_by_account_id_across_url_variants(tmp_path):
+    store = CrawlerStore(tmp_path / "red-crawler.db")
+    now = datetime(2026, 3, 29, 1, 0, tzinfo=timezone.utc)
+
+    inserted = store.enqueue_discovery_candidates(
+        [
+            {
+                "profile_url": "https://www.xiaohongshu.com/user/profile/user-101?xsec_source=pc_search",
+                "account_id": "user-101",
+                "priority": 0.55,
+            },
+            {
+                "profile_url": (
+                    "https://www.xiaohongshu.com/user/profile/"
+                    "user-101/63184102000000001103a3e7?xsec_token=abc&xsec_source=pc_user"
+                ),
+                "account_id": "user-101",
+                "priority": 0.91,
+            },
+        ],
+        source_type="search_result",
+        source_seed_account_id="",
+        search_term="美妆博主",
+        now=now,
+    )
+
+    items = store.dequeue_discovery_candidates(limit=10, now=now)
+
+    assert inserted == 1
+    assert len(items) == 1
+    assert items[0].account_id == "user-101"
+    assert items[0].priority == 0.91
+
+
+def test_store_collect_window_usage_sums_attempts_and_search_terms(tmp_path):
+    store = CrawlerStore(tmp_path / "red-crawler.db")
+    now = datetime(2026, 3, 29, 1, 0, tzinfo=timezone.utc)
+
+    first_run = store.start_run(
+        run_type="collect_nightly",
+        safe_mode=True,
+        crawl_budget=12,
+        started_at=now,
+    )
+    store.finalize_run(
+        first_run,
+        attempted_accounts=5,
+        succeeded_accounts=5,
+        failed_accounts=0,
+        lead_counts={},
+        errors=[],
+        aborted=False,
+        abort_reason=None,
+        processed_search_terms=["美妆博主", "护肤博主"],
+        finished_at=now,
+    )
+
+    second_run = store.start_run(
+        run_type="collect_nightly",
+        safe_mode=True,
+        crawl_budget=12,
+        started_at=now + timedelta(hours=8),
+    )
+    store.finalize_run(
+        second_run,
+        attempted_accounts=4,
+        succeeded_accounts=4,
+        failed_accounts=0,
+        lead_counts={},
+        errors=[],
+        aborted=False,
+        abort_reason=None,
+        processed_search_terms=["彩妆博主"],
+        finished_at=now + timedelta(hours=8),
+    )
+
+    usage = store.get_collect_window_usage(
+        window_start=now.replace(hour=0, minute=0, second=0, microsecond=0),
+        window_end=now.replace(hour=0, minute=0, second=0, microsecond=0)
+        + timedelta(days=1),
+    )
+
+    assert usage.run_count == 2
+    assert usage.attempted_accounts == 9
+    assert usage.processed_search_terms == 3

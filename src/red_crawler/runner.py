@@ -11,10 +11,12 @@ from red_crawler.crawl.similar import (
     extract_search_result_profiles,
     extract_similar_profiles,
     is_relevant_creator_candidate,
+    parse_follower_count,
     score_creator_relevance,
 )
 from red_crawler.extract.contacts import extract_contact_leads
 from red_crawler.models import AccountRecord, ContactLead, CrawlResult, RunReport
+from red_crawler.profile_url import build_profile_dedupe_key
 from red_crawler.session import (
     BrowserSession,
     PlaywrightCrawlerClient,
@@ -38,6 +40,22 @@ class CrawlConfig:
     max_accounts: int = 20
     max_depth: int = 2
     include_note_recommendations: bool = False
+    safe_mode: bool = False
+    cache_dir: str | None = None
+    cache_ttl_days: int = 7
+    gender_filter: str | None = None
+
+
+@dataclass
+class SearchCrawlConfig:
+    search_term: str
+    storage_state: str
+    output_dir: str
+    max_accounts: int = 20
+    search_scroll_rounds: int = 2
+    min_followers: int = 0
+    min_relevance_score: float = 0.0
+    creator_only: bool = False
     safe_mode: bool = False
     cache_dir: str | None = None
     cache_ttl_days: int = 7
@@ -92,14 +110,163 @@ def run_crawl_seed(config: CrawlConfig) -> CrawlResult:
         return run_crawl_seed_with_client(config, client)
 
 
+def run_crawl_search(config: SearchCrawlConfig) -> CrawlResult:
+    with BrowserSession(config.storage_state) as session:
+        client = PlaywrightCrawlerClient(
+            session,
+            safe_mode=config.safe_mode,
+            search_scroll_rounds=config.search_scroll_rounds,
+            cache_dir=config.cache_dir,
+            cache_ttl_days=config.cache_ttl_days,
+        )
+        return run_crawl_search_with_client(config, client)
+
+
+def run_crawl_search_with_client(
+    config: SearchCrawlConfig, client: CrawlClient
+) -> CrawlResult:
+    gender_filter = _normalize_gender_filter(config.gender_filter)
+    accounts: list[AccountRecord] = []
+    contact_leads: list[ContactLead] = []
+    errors: list[dict[str, str]] = []
+    aborted = False
+    abort_reason: str | None = None
+    queued_keys: set[str] = set()
+    query_payload: Dict[str, object] = {
+        "bio_text": config.search_term,
+        "visible_metadata": {"tags": [config.search_term]},
+    }
+
+    try:
+        search_htmls = client.fetch_search_result_htmls(config.search_term)
+    except RiskControlTriggered as exc:
+        aborted = True
+        abort_reason = str(exc)
+        errors.append({"search_term": config.search_term, "error": str(exc)})
+        search_htmls = []
+
+    candidates: list[dict[str, object]] = []
+    for search_html in search_htmls:
+        remaining_slots = config.max_accounts - len(queued_keys)
+        if remaining_slots <= 0:
+            break
+        for candidate in extract_search_result_profiles(
+            html=search_html,
+            max_results=remaining_slots,
+        ):
+            candidate_key = build_profile_dedupe_key(
+                candidate["profile_url"],
+                str(candidate.get("account_id", "")),
+            )
+            if candidate_key in queued_keys:
+                continue
+            queued_keys.add(candidate_key)
+            candidates.append(candidate)
+            if len(candidates) >= config.max_accounts:
+                break
+
+    for candidate in candidates:
+        profile_url = str(candidate["profile_url"])
+        try:
+            html = client.fetch_profile_html(profile_url)
+            account = parse_profile_html(
+                html=html,
+                profile_url=profile_url,
+                source_type="search_result",
+                source_from=None,
+            )
+            account.discovery_depth = 0
+            account_payload = {
+                "nickname": account.nickname,
+                "bio_text": account.bio_text,
+                "visible_metadata": account.visible_metadata,
+            }
+            account.creator_segment = classify_creator_segment(account_payload)
+            account.relevance_score = score_creator_relevance(
+                seed_account=query_payload,
+                candidate_account=account_payload,
+            )
+            candidate_tags = account.visible_metadata.get("tags", []) or []
+            if isinstance(candidate_tags, str):
+                candidate_tags = [candidate_tags]
+            candidate_text = " ".join(
+                [account.nickname, account.bio_text]
+                + [str(tag) for tag in candidate_tags]
+            )
+            normalized_search_term = " ".join(config.search_term.split()).strip()
+            search_term_matched = False
+            if normalized_search_term and normalized_search_term in candidate_text:
+                search_term_matched = True
+            elif (
+                normalized_search_term.endswith("博主")
+                and normalized_search_term[:-2]
+                and normalized_search_term[:-2] in candidate_text
+                and "博主" in candidate_text
+            ):
+                search_term_matched = True
+            if search_term_matched:
+                account.relevance_score = round(min(account.relevance_score + 0.25, 1.0), 2)
+            follower_count = parse_follower_count(
+                str(account.visible_metadata.get("followers", ""))
+            )
+            if config.creator_only and account.creator_segment != "creator":
+                continue
+            if follower_count < max(config.min_followers, 0):
+                continue
+            if account.relevance_score < config.min_relevance_score:
+                continue
+            if _matches_gender_filter(account, gender_filter):
+                accounts.append(account)
+                contact_leads.extend(
+                    extract_contact_leads(
+                        account_id=account.account_id,
+                        bio_text=account.bio_text,
+                    )
+                )
+        except RiskControlTriggered as exc:
+            aborted = True
+            abort_reason = str(exc)
+            errors.append({"profile_url": profile_url, "error": str(exc)})
+            break
+        except Exception as exc:
+            accounts.append(
+                build_failed_account_record(
+                    profile_url=profile_url,
+                    source_type="search_result",
+                    source_from=None,
+                    error=str(exc),
+                    discovery_depth=0,
+                )
+            )
+            errors.append({"profile_url": profile_url, "error": str(exc)})
+
+    lead_counts = dict(sorted(Counter(lead.lead_type for lead in contact_leads).items()))
+    failed_accounts = sum(1 for account in accounts if account.crawl_status != "success")
+    return CrawlResult(
+        accounts=accounts,
+        contact_leads=contact_leads,
+        run_report=RunReport(
+            seed_url=f"search:{config.search_term}",
+            attempted_accounts=len(accounts),
+            succeeded_accounts=len(accounts) - failed_accounts,
+            failed_accounts=failed_accounts,
+            lead_counts=lead_counts,
+            aborted=aborted,
+            abort_reason=abort_reason,
+            errors=errors,
+        ),
+    )
+
+
 def run_crawl_seed_with_client(
     config: CrawlConfig, client: CrawlClient
 ) -> CrawlResult:
     gender_filter = _normalize_gender_filter(config.gender_filter)
+    seed_queue_key = build_profile_dedupe_key(config.seed_url)
     queue: Deque[Tuple[str, int, str, Optional[str]]] = deque(
         [(config.seed_url, 0, "seed", None)]
     )
-    queued_urls = {config.seed_url}
+    queued_keys = {seed_queue_key}
     accounts: list[AccountRecord] = []
     contact_leads: list[ContactLead] = []
     errors: list[dict[str, str]] = []
@@ -161,7 +328,7 @@ def run_crawl_seed_with_client(
         if depth >= config.max_depth or len(accounts) >= config.max_accounts:
             continue
 
-        remaining_slots = config.max_accounts - len(queued_urls)
+        remaining_slots = config.max_accounts - len(queued_keys)
         if remaining_slots <= 0:
             continue
 
@@ -175,7 +342,7 @@ def run_crawl_seed_with_client(
         ]
         if config.include_note_recommendations:
             for note_html in client.fetch_note_recommendation_html(profile_url):
-                extra_slots = config.max_accounts - len(queued_urls)
+                extra_slots = config.max_accounts - len(queued_keys)
                 if extra_slots <= 0:
                     break
                 recommendation_candidates.extend(
@@ -196,7 +363,7 @@ def run_crawl_seed_with_client(
                 "visible_metadata": account.visible_metadata,
             }
             for query in build_search_queries(seed_payload):
-                extra_slots = config.max_accounts - len(queued_urls)
+                extra_slots = config.max_accounts - len(queued_keys)
                 if extra_slots <= 0:
                     break
                 try:
@@ -207,7 +374,7 @@ def run_crawl_seed_with_client(
                     errors.append({"profile_url": profile_url, "error": str(exc)})
                     break
                 for search_html in search_htmls:
-                    extra_slots = config.max_accounts - len(queued_urls)
+                    extra_slots = config.max_accounts - len(queued_keys)
                     if extra_slots <= 0:
                         break
                     search_candidates.extend(
@@ -222,7 +389,11 @@ def run_crawl_seed_with_client(
             filtered_search_candidates = []
             for candidate in search_candidates:
                 candidate_url = candidate["profile_url"]
-                if candidate_url in queued_urls:
+                candidate_key = build_profile_dedupe_key(
+                    candidate_url,
+                    str(candidate.get("account_id", "")),
+                )
+                if candidate_key in queued_keys:
                     continue
                 try:
                     candidate_html = client.fetch_profile_html(candidate_url)
@@ -259,9 +430,13 @@ def run_crawl_seed_with_client(
 
         for candidate in recommendation_candidates:
             candidate_url = candidate["profile_url"]
-            if candidate_url in queued_urls:
+            candidate_key = build_profile_dedupe_key(
+                candidate_url,
+                str(candidate.get("account_id", "")),
+            )
+            if candidate_key in queued_keys:
                 continue
-            queued_urls.add(candidate_url)
+            queued_keys.add(candidate_key)
             queue.append(
                 (
                     candidate_url,
@@ -270,7 +445,7 @@ def run_crawl_seed_with_client(
                     account.account_id,
                 )
             )
-            if len(queued_urls) >= config.max_accounts:
+            if len(queued_keys) >= config.max_accounts:
                 break
         if aborted:
             break

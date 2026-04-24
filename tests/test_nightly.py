@@ -203,6 +203,88 @@ def test_collect_nightly_randomizes_search_term_order(tmp_path):
     assert client.search_queries[:2] == ["护肤博主", "美妆博主"]
 
 
+def test_collect_nightly_respects_daily_budgets_across_multiple_runs(tmp_path):
+    db_path = tmp_path / "red-crawler.db"
+    store = CrawlerStore(db_path)
+    search_html = """
+    <div class="note-item">
+      <div class="footer">
+        <div class="card-bottom-wrapper">
+          <a class="author" href="/user/profile/user-101?xsec_source=pc_search">A</a>
+          <a class="author" href="/user/profile/user-102?xsec_source=pc_search">B</a>
+          <a class="author" href="/user/profile/user-103?xsec_source=pc_search">C</a>
+        </div>
+      </div>
+    </div>
+    """
+    pages = {
+        "https://www.xiaohongshu.com/user/profile/user-101?xsec_source=pc_search": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-101</div>
+          <h1 class="user-name">A</h1>
+          <div class="user-bio">美妆博主 邮箱：a@example.com</div>
+          <div class="user-tags"><span>美妆博主</span></div>
+          <div class="user-followers">粉丝 2.6万</div>
+        </section>
+        """,
+        "https://www.xiaohongshu.com/user/profile/user-102?xsec_source=pc_search": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-102</div>
+          <h1 class="user-name">B</h1>
+          <div class="user-bio">护肤博主 邮箱：b@example.com</div>
+          <div class="user-tags"><span>护肤博主</span></div>
+          <div class="user-followers">粉丝 2.2万</div>
+        </section>
+        """,
+        "https://www.xiaohongshu.com/user/profile/user-103?xsec_source=pc_search": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-103</div>
+          <h1 class="user-name">C</h1>
+          <div class="user-bio">彩妆博主 邮箱：c@example.com</div>
+          <div class="user-tags"><span>彩妆博主</span></div>
+          <div class="user-followers">粉丝 2.1万</div>
+        </section>
+        """,
+    }
+    client = FakeNightlyClient(
+        search_pages={
+            "美妆博主": [search_html],
+            "护肤博主": [search_html],
+        },
+        pages=pages,
+    )
+    config = NightlyCollectConfig(
+        storage_state="state.json",
+        db_path=str(db_path),
+        report_dir=str(tmp_path / "reports"),
+        cache_dir=str(tmp_path / "cache"),
+        crawl_budget=30,
+        search_term_limit=4,
+        daily_account_budget=3,
+        daily_search_term_budget=2,
+    )
+
+    first = collect_nightly_with_client(
+        config,
+        client,
+        store=store,
+        now_fn=lambda: datetime(2026, 3, 29, 1, 0, tzinfo=timezone.utc),
+    )
+    second = collect_nightly_with_client(
+        config,
+        client,
+        store=store,
+        now_fn=lambda: datetime(2026, 3, 29, 13, 0, tzinfo=timezone.utc),
+    )
+
+    assert first.crawl_budget == 3
+    assert first.processed_accounts == 3
+    assert len(first.processed_search_terms) == 2
+    assert second.crawl_budget == 0
+    assert second.processed_accounts == 0
+    assert second.processed_search_terms == []
+
+
 def test_collect_nightly_stops_after_crawl_budget_and_leaves_pending_queue(tmp_path):
     db_path = tmp_path / "red-crawler.db"
     store = CrawlerStore(db_path)

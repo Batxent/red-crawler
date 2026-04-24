@@ -211,12 +211,14 @@ class PlaywrightCrawlerClient:
         base_url: str = "https://www.xiaohongshu.com",
         safe_mode: bool = False,
         safe_mode_controller: SafeModeController | None = None,
+        search_scroll_rounds: int = 2,
         cache_dir: str | Path | None = None,
         cache_ttl_days: int = 7,
         time_fn: Callable[[], float] = time.time,
     ):
         self.session = session
         self.base_url = base_url.rstrip("/")
+        self.search_scroll_rounds = max(int(search_scroll_rounds), 0)
         self.safe_mode_controller = safe_mode_controller or SafeModeController(
             enabled=safe_mode,
             log_fn=print if safe_mode else (lambda _message: None),
@@ -369,7 +371,10 @@ class PlaywrightCrawlerClient:
                 return list(htmls)
             self.safe_mode_controller.log_fn("safe-mode: disk cache expired for search")
         search_url = f"{self.base_url}/search_result?keyword={quote(query)}&source=web_explore_feed"
-        htmls = self._load_search_result_htmls(search_url)
+        htmls = self._load_search_result_htmls(
+            search_url,
+            scroll_rounds=self.search_scroll_rounds,
+        )
         self._search_html_cache[query] = list(htmls)
         if cache_path is not None:
             cache_path.write_text(
@@ -618,6 +623,5 @@ def extract_note_detail_urls(
         if len(note_links) >= max_results:
             break
     return note_links
-
 
 

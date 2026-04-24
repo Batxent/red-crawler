@@ -15,7 +15,7 @@ from red_crawler.nightly import (
     run_nightly_collection,
     write_weekly_reports,
 )
-from red_crawler.runner import CrawlConfig, run_crawl_seed
+from red_crawler.runner import CrawlConfig, SearchCrawlConfig, run_crawl_search, run_crawl_seed
 from red_crawler.session import (
     open_xiaohongshu,
     save_login_storage_state,
@@ -31,6 +31,20 @@ def _default_login_qr_path(save_state: str) -> Path:
 
 def _default_login_session_path(save_state: str) -> Path:
     return Path(save_state).with_suffix(".login-session.json")
+
+
+def _add_discovery_collect_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--storage-state", required=True)
+    parser.add_argument("--db-path", default="data/red_crawler.db")
+    parser.add_argument("--report-dir", default="reports")
+    parser.add_argument("--cache-dir", default=".cache/red-crawler")
+    parser.add_argument("--cache-ttl-days", type=int, default=7)
+    parser.add_argument("--crawl-budget", type=int, default=12)
+    parser.add_argument("--search-term-limit", type=int, default=2)
+    parser.add_argument("--daily-account-budget", type=int, default=12)
+    parser.add_argument("--daily-search-term-budget", type=int, default=2)
+    parser.add_argument("--startup-jitter-minutes", type=int, default=0)
+    parser.add_argument("--slot-name", default="")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -52,6 +66,23 @@ def build_parser() -> argparse.ArgumentParser:
     crawl_seed.add_argument("--gender-filter")
     crawl_seed.add_argument("--db-path", default="data/red_crawler.db")
     crawl_seed.add_argument("--output-dir", default="output")
+
+    crawl_search = subparsers.add_parser("crawl-search")
+    crawl_search.add_argument("--search-term", required=True)
+    crawl_search.add_argument("--storage-state", required=True)
+    crawl_search.add_argument("--max-accounts", type=int, default=20)
+    crawl_search.add_argument("--search-scroll-rounds", type=int, default=2)
+    crawl_search.add_argument("--min-followers", type=int, default=0)
+    crawl_search.add_argument("--min-relevance-score", type=float, default=0.0)
+    crawl_search.add_argument("--creator-only", action="store_true")
+    crawl_search.set_defaults(safe_mode=True)
+    crawl_search.add_argument("--safe-mode", dest="safe_mode", action="store_true")
+    crawl_search.add_argument("--no-safe-mode", dest="safe_mode", action="store_false")
+    crawl_search.add_argument("--cache-dir")
+    crawl_search.add_argument("--cache-ttl-days", type=int, default=7)
+    crawl_search.add_argument("--gender-filter")
+    crawl_search.add_argument("--db-path", default="data/red_crawler.db")
+    crawl_search.add_argument("--output-dir", default="output")
 
     login = subparsers.add_parser("login")
     login.add_argument("--save-state", required=True)
@@ -81,15 +112,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("install-browsers")
 
     collect_nightly = subparsers.add_parser("collect-nightly")
-    collect_nightly.add_argument("--storage-state", required=True)
-    collect_nightly.add_argument("--db-path", default="data/red_crawler.db")
-    collect_nightly.add_argument("--report-dir", default="reports")
-    collect_nightly.add_argument("--cache-dir", default=".cache/red-crawler")
-    collect_nightly.add_argument("--cache-ttl-days", type=int, default=7)
-    collect_nightly.add_argument("--crawl-budget", type=int, default=30)
-    collect_nightly.add_argument("--search-term-limit", type=int, default=4)
-    collect_nightly.add_argument("--startup-jitter-minutes", type=int, default=0)
-    collect_nightly.add_argument("--slot-name", default="")
+    _add_discovery_collect_args(collect_nightly)
+
+    crawl_discover = subparsers.add_parser("crawl-discover")
+    _add_discovery_collect_args(crawl_discover)
 
     report_weekly = subparsers.add_parser("report-weekly")
     report_weekly.add_argument("--db-path", default="data/red_crawler.db")
@@ -184,7 +210,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             check=False,
         ).returncode
 
-    if args.command == "collect-nightly":
+    if args.command in {"collect-nightly", "crawl-discover"}:
         config = NightlyCollectConfig(
             storage_state=args.storage_state,
             db_path=str(args.db_path),
@@ -193,6 +219,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             cache_ttl_days=args.cache_ttl_days,
             crawl_budget=args.crawl_budget,
             search_term_limit=args.search_term_limit,
+            daily_account_budget=args.daily_account_budget,
+            daily_search_term_budget=args.daily_search_term_budget,
             startup_jitter_minutes=args.startup_jitter_minutes,
             slot_name=args.slot_name,
         )
@@ -249,6 +277,33 @@ def main(argv: Sequence[str] | None = None) -> int:
                         ]
                     )
                 )
+        return 0
+
+    if args.command == "crawl-search":
+        output_dir = Path(args.output_dir)
+        config = SearchCrawlConfig(
+            search_term=args.search_term,
+            storage_state=args.storage_state,
+            output_dir=str(output_dir),
+            max_accounts=args.max_accounts,
+            search_scroll_rounds=args.search_scroll_rounds,
+            min_followers=args.min_followers,
+            min_relevance_score=args.min_relevance_score,
+            creator_only=args.creator_only,
+            safe_mode=args.safe_mode,
+            cache_dir=args.cache_dir,
+            cache_ttl_days=args.cache_ttl_days,
+            gender_filter=args.gender_filter,
+        )
+        result = run_crawl_search(config)
+        export_run(result, output_dir)
+        store = CrawlerStore(Path(args.db_path))
+        store.record_crawl_result(
+            result,
+            run_type="crawl_search",
+            safe_mode=args.safe_mode,
+            started_at=datetime.now(timezone.utc),
+        )
         return 0
 
     if args.command != "crawl-seed":

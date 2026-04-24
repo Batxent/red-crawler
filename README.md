@@ -53,6 +53,23 @@ Use `--gender-filter "男"` or `--gender-filter "女"` to keep only inferred mal
 - exports `accounts.csv`, `contact_leads.csv`, `run_report.json`
 - upserts the same result into SQLite
 
+Run a manual crawl for one explicit search term without a `seed_url`:
+
+```bash
+red-crawler crawl-search \
+  --search-term "抗痘博主" \
+  --storage-state "./state.json" \
+  --max-accounts 20 \
+  --search-scroll-rounds 8 \
+  --creator-only \
+  --min-followers 5000 \
+  --min-relevance-score 0.7 \
+  --db-path "./data/red_crawler.db" \
+  --output-dir "./output"
+```
+
+想尽量覆盖某个搜索词下的博主时，可以把 `--search-scroll-rounds` 和 `--max-accounts` 调大，同时配合 `--creator-only`、`--min-followers`、`--min-relevance-score` 做收口。这里的“全量”只能是尽量覆盖，平台搜索结果本身不是稳定全量接口，而且滚动过深会明显增加风控概率。
+
 Optional note-page expansion:
 
 ```bash
@@ -79,7 +96,22 @@ red-crawler collect-nightly \
   --db-path "./data/red_crawler.db" \
   --report-dir "./reports" \
   --cache-dir "./.cache/red-crawler" \
-  --crawl-budget 30
+  --crawl-budget 12 \
+  --daily-account-budget 12 \
+  --daily-search-term-budget 2
+```
+
+`collect-nightly` now enforces a daily budget across all runs started on the same UTC day. If you schedule multiple slots, later runs automatically shrink or skip once the daily profile/search-term budget is used up.
+
+Run the same discovery flow manually without a `seed_url`:
+
+```bash
+red-crawler crawl-discover \
+  --storage-state "./state.json" \
+  --db-path "./data/red_crawler.db" \
+  --report-dir "./reports" \
+  --cache-dir "./.cache/red-crawler" \
+  --crawl-budget 6
 ```
 
 Export weekly growth report and a contactable creator CSV:
@@ -127,11 +159,11 @@ The package builds as a standard Python wheel and source distribution:
 uv build
 ```
 
-See [docs/publishing.md](/Users/tommy/Documents/GitHubOpenSources/red-crawler/docs/publishing.md) for the release checklist and PyPI/TestPyPI commands.
+See [docs/publishing.md](/docs/publishing.md) for the release checklist and PyPI/TestPyPI commands.
 
 ## launchd
 
-For macOS local scheduling, use the template at [docs/launchd/red-crawler.collect-nightly.plist](/Users/tommy/Documents/GitHubOpenSources/red-crawler/docs/launchd/red-crawler.collect-nightly.plist).
+For macOS local scheduling, use the template at [docs/launchd/red-crawler.collect-nightly.plist](/docs/launchd/red-crawler.collect-nightly.plist).
 
 Replace the placeholder paths:
 

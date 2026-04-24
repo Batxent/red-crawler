@@ -3,9 +3,11 @@ from __future__ import annotations
 from collections import deque
 import re
 from typing import Dict, List
-from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin
+
+from red_crawler.profile_url import extract_account_id_from_profile_url
 
 DEFAULT_BASE_URL = "https://www.xiaohongshu.com"
 DOMAIN_CLUSTERS = {
@@ -32,7 +34,7 @@ CREATOR_HINTS = DOMAIN_HINTS + ("博主", "分享", "教程")
 
 
 def _extract_account_id_from_url(profile_url: str) -> str:
-    return urlparse(profile_url).path.rstrip("/").split("/")[-1]
+    return extract_account_id_from_profile_url(profile_url)
 
 
 def extract_similar_profiles(

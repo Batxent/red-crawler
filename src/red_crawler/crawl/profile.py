@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import re
 from typing import Optional
-from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
 from red_crawler.models import AccountRecord
+from red_crawler.profile_url import extract_account_id_from_profile_url
 
 DEFAULT_BASE_URL = "https://www.xiaohongshu.com"
 FAILURE_TEXT_MARKERS = (
@@ -39,10 +39,7 @@ def _extract_account_id(text: str, profile_url: str) -> str:
     match = re.search(r"账号ID[:：]?\s*([A-Za-z0-9_-]+)", text)
     if match:
         return match.group(1)
-    path = urlparse(profile_url).path.rstrip("/")
-    if path:
-        return path.split("/")[-1]
-    return profile_url
+    return extract_account_id_from_profile_url(profile_url)
 
 
 def parse_profile_html(

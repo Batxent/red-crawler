@@ -5,7 +5,7 @@ import json
 import random
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -20,7 +20,12 @@ from red_crawler.crawl.similar import (
 )
 from red_crawler.extract.contacts import extract_contact_leads
 from red_crawler.models import AccountRecord, ContactLead
-from red_crawler.session import BrowserSession, PlaywrightCrawlerClient, RiskControlTriggered
+from red_crawler.session import (
+    BrowserSession,
+    PlaywrightCrawlerClient,
+    RiskControlTriggered,
+    SafeModeController,
+)
 from red_crawler.store import CrawlerStore, WeeklyGrowthReport
 
 
@@ -86,8 +91,10 @@ class NightlyCollectConfig:
     db_path: str
     report_dir: str
     cache_dir: str
-    crawl_budget: int = 30
-    search_term_limit: int = 4
+    crawl_budget: int = 12
+    search_term_limit: int = 2
+    daily_account_budget: int = 12
+    daily_search_term_budget: int = 2
     safe_mode: bool = True
     cache_ttl_days: int = 7
     refresh_after_days: int = 14
@@ -204,11 +211,25 @@ def collect_nightly_with_client(
     rng = rng or random.Random()
     started_at = _ensure_utc(now_fn())
     store.seed_default_search_terms(now=started_at)
+    day_start = started_at.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = day_start + timedelta(days=1)
+    daily_usage = store.get_collect_window_usage(
+        window_start=day_start,
+        window_end=day_end,
+    )
+    effective_crawl_budget = min(
+        config.crawl_budget,
+        max(config.daily_account_budget - daily_usage.attempted_accounts, 0),
+    )
+    effective_search_term_limit = min(
+        config.search_term_limit,
+        max(config.daily_search_term_budget - daily_usage.processed_search_terms, 0),
+    )
 
     run_id = store.start_run(
         run_type="collect_nightly",
         safe_mode=config.safe_mode,
-        crawl_budget=config.crawl_budget,
+        crawl_budget=effective_crawl_budget,
         started_at=started_at,
     )
 
@@ -221,7 +242,7 @@ def collect_nightly_with_client(
     aborted = False
     abort_reason: str | None = None
     processed_search_terms = store.select_search_terms(
-        limit=config.search_term_limit,
+        limit=effective_search_term_limit,
         now=started_at,
     )
     if processed_search_terms:
@@ -256,12 +277,12 @@ def collect_nightly_with_client(
 
     if not aborted:
         queued_candidates += store.enqueue_refresh_candidates(
-            limit=max(config.crawl_budget - queued_candidates, 0),
+            limit=max(effective_crawl_budget - queued_candidates, 0),
             now=started_at,
             refresh_after_days=config.refresh_after_days,
         )
 
-    while not aborted and processed_accounts < config.crawl_budget:
+    while not aborted and processed_accounts < effective_crawl_budget:
         items = store.dequeue_discovery_candidates(limit=1, now=started_at)
         if not items:
             break
@@ -401,7 +422,7 @@ def collect_nightly_with_client(
     result = NightlyCollectResult(
         run_id=run_id,
         generated_at=started_at.isoformat(),
-        crawl_budget=config.crawl_budget,
+        crawl_budget=effective_crawl_budget,
         queued_candidates=queued_candidates,
         processed_accounts=processed_accounts,
         new_contactable_creators=new_contactable_creators,
@@ -430,6 +451,12 @@ def run_nightly_collection(config: NightlyCollectConfig) -> NightlyCollectResult
         client = PlaywrightCrawlerClient(
             session,
             safe_mode=config.safe_mode,
+            safe_mode_controller=SafeModeController(
+                enabled=config.safe_mode,
+                log_fn=print if config.safe_mode else (lambda _message: None),
+                pause_every=2,
+                risk_threshold=1,
+            ),
             cache_dir=config.cache_dir,
             cache_ttl_days=config.cache_ttl_days,
         )

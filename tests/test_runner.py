@@ -1,4 +1,9 @@
-from red_crawler.runner import CrawlConfig, run_crawl_seed_with_client
+from red_crawler.runner import (
+    CrawlConfig,
+    SearchCrawlConfig,
+    run_crawl_search_with_client,
+    run_crawl_seed_with_client,
+)
 from red_crawler.session import RiskControlTriggered
 
 
@@ -345,6 +350,68 @@ def test_run_crawl_seed_uses_multiple_search_queries_to_fill_more_candidates():
     ]
 
 
+def test_run_crawl_seed_dedupes_same_account_across_profile_url_variants():
+    pages = {
+        "https://www.xiaohongshu.com/user/profile/user-001": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-001</div>
+          <h1 class="user-name">Seed</h1>
+          <div class="user-bio">美妆护肤内容分享</div>
+          <div class="user-tags"><span>美妆博主</span></div>
+          <div class="user-followers">粉丝 35.1万</div>
+        </section>
+        """,
+        "https://www.xiaohongshu.com/user/profile/user-002?xsec_source=pc_search": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-002</div>
+          <h1 class="user-name">U2</h1>
+          <div class="user-bio">护肤博主 邮箱：u2@example.com</div>
+          <div class="user-tags"><span>护肤博主</span></div>
+          <div class="user-followers">粉丝 2.1万</div>
+        </section>
+        """,
+    }
+    search_pages = {
+        "美妆博主": [
+            """
+            <div class="note-item">
+              <div class="footer">
+                <div class="card-bottom-wrapper">
+                  <a class="author" href="/user/profile/user-002?xsec_source=pc_search">U2</a>
+                </div>
+              </div>
+            </div>
+            """
+        ],
+        "护肤博主": [
+            """
+            <div class="note-item">
+              <div class="footer">
+                <div class="card-bottom-wrapper">
+                  <a class="author" href="/user/profile/user-002/63184102000000001103a3e7?xsec_token=abc&xsec_source=pc_user">U2</a>
+                </div>
+              </div>
+            </div>
+            """
+        ],
+        "彩妆博主": [""],
+        "化妆博主": [""],
+    }
+    client = FakeClient(pages=pages, search_pages=search_pages)
+    config = CrawlConfig(
+        seed_url="https://www.xiaohongshu.com/user/profile/user-001",
+        storage_state="state.json",
+        output_dir="out",
+        max_accounts=10,
+        max_depth=1,
+        include_note_recommendations=False,
+    )
+
+    result = run_crawl_seed_with_client(config, client)
+
+    assert [account.account_id for account in result.accounts] == ["user-001", "user-002"]
+
+
 def test_run_crawl_seed_allows_second_layer_search_expansion():
     pages = {
         "https://www.xiaohongshu.com/user/profile/user-001": """
@@ -542,3 +609,144 @@ def test_run_crawl_seed_aborts_gracefully_when_risk_control_triggers():
     assert result.run_report.aborted is True
     assert result.run_report.abort_reason == "risk control threshold reached"
     assert result.run_report.errors[-1]["error"] == "risk control threshold reached"
+
+
+def test_run_crawl_search_collects_users_for_one_search_term():
+    pages = {
+        "https://www.xiaohongshu.com/user/profile/user-201?xsec_source=pc_search": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-201</div>
+          <h1 class="user-name">A</h1>
+          <div class="user-bio">抗痘护肤博主 邮箱：a@example.com</div>
+          <div class="user-tags"><span>护肤博主</span></div>
+          <div class="user-followers">粉丝 2.1万</div>
+        </section>
+        """,
+        "https://www.xiaohongshu.com/user/profile/user-202?xsec_source=pc_search": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-202</div>
+          <h1 class="user-name">B</h1>
+          <div class="user-bio">彩妆博主</div>
+          <div class="user-tags"><span>彩妆博主</span></div>
+          <div class="user-followers">粉丝 1.5万</div>
+        </section>
+        """,
+    }
+    search_pages = {
+        "抗痘博主": [
+            """
+            <div class="note-item">
+              <div class="footer">
+                <div class="card-bottom-wrapper">
+                  <a class="author" href="/user/profile/user-201?xsec_source=pc_search">A</a>
+                  <a class="author" href="/user/profile/user-202?xsec_source=pc_search">B</a>
+                </div>
+              </div>
+            </div>
+            """
+        ]
+    }
+    client = FakeClient(pages=pages, search_pages=search_pages)
+    config = SearchCrawlConfig(
+        search_term="抗痘博主",
+        storage_state="state.json",
+        output_dir="out",
+        max_accounts=5,
+    )
+
+    result = run_crawl_search_with_client(config, client)
+
+    assert [account.account_id for account in result.accounts] == ["user-201", "user-202"]
+    assert result.accounts[0].source_type == "search_result"
+    assert result.run_report.seed_url == "search:抗痘博主"
+    assert result.run_report.lead_counts == {"email": 1}
+
+
+def test_run_crawl_search_dedupes_same_user_across_search_url_variants():
+    pages = {
+        "https://www.xiaohongshu.com/user/profile/user-201?xsec_source=pc_search": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-201</div>
+          <h1 class="user-name">A</h1>
+          <div class="user-bio">抗痘护肤博主</div>
+          <div class="user-tags"><span>护肤博主</span></div>
+          <div class="user-followers">粉丝 2.1万</div>
+        </section>
+        """,
+    }
+    search_pages = {
+        "抗痘博主": [
+            """
+            <div class="note-item">
+              <div class="footer">
+                <div class="card-bottom-wrapper">
+                  <a class="author" href="/user/profile/user-201?xsec_source=pc_search">A</a>
+                  <a class="author" href="/user/profile/user-201/63184102000000001103a3e7?xsec_token=abc&xsec_source=pc_user">A</a>
+                </div>
+              </div>
+            </div>
+            """
+        ]
+    }
+    client = FakeClient(pages=pages, search_pages=search_pages)
+    config = SearchCrawlConfig(
+        search_term="抗痘博主",
+        storage_state="state.json",
+        output_dir="out",
+        max_accounts=5,
+    )
+
+    result = run_crawl_search_with_client(config, client)
+
+    assert [account.account_id for account in result.accounts] == ["user-201"]
+
+
+def test_run_crawl_search_filters_by_min_followers_and_creator_only():
+    pages = {
+        "https://www.xiaohongshu.com/user/profile/user-201?xsec_source=pc_search": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-201</div>
+          <h1 class="user-name">A</h1>
+          <div class="user-bio">抗痘护肤博主</div>
+          <div class="user-tags"><span>护肤博主</span></div>
+          <div class="user-followers">粉丝 1.2万</div>
+        </section>
+        """,
+        "https://www.xiaohongshu.com/user/profile/user-202?xsec_source=pc_search": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-202</div>
+          <h1 class="user-name">B工作室</h1>
+          <div class="user-bio">抗痘护肤工作室</div>
+          <div class="user-tags"><span>工作室</span></div>
+          <div class="user-followers">粉丝 5.8万</div>
+        </section>
+        """,
+    }
+    search_pages = {
+        "抗痘博主": [
+            """
+            <div class="note-item">
+              <div class="footer">
+                <div class="card-bottom-wrapper">
+                  <a class="author" href="/user/profile/user-201?xsec_source=pc_search">A</a>
+                  <a class="author" href="/user/profile/user-202?xsec_source=pc_search">B</a>
+                </div>
+              </div>
+            </div>
+            """
+        ]
+    }
+    client = FakeClient(pages=pages, search_pages=search_pages)
+    config = SearchCrawlConfig(
+        search_term="抗痘博主",
+        storage_state="state.json",
+        output_dir="out",
+        max_accounts=5,
+        min_followers=10000,
+        creator_only=True,
+        min_relevance_score=0.7,
+    )
+
+    result = run_crawl_search_with_client(config, client)
+
+    assert [account.account_id for account in result.accounts] == ["user-201"]

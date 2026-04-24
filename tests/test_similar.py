@@ -107,6 +107,44 @@ def test_extract_search_result_profiles_extracts_authors_from_search_cards():
     ]
 
 
+def test_extract_search_result_profiles_dedupes_same_user_across_url_variants():
+    html = """
+    <html>
+      <body>
+        <div class="note-item">
+          <div class="footer">
+            <div class="card-bottom-wrapper">
+              <a class="author" href="/user/profile/user-010?xsec_source=pc_search">美妆博主A</a>
+            </div>
+          </div>
+        </div>
+        <div class="note-item">
+          <div class="footer">
+            <div class="card-bottom-wrapper">
+              <a class="author" href="/user/profile/user-010/63184102000000001103a3e7?xsec_token=abc&xsec_source=pc_user">美妆博主A</a>
+            </div>
+          </div>
+        </div>
+      </body>
+    </html>
+    """
+
+    from red_crawler.crawl.similar import extract_search_result_profiles
+
+    profiles = extract_search_result_profiles(
+        html=html,
+        max_results=5,
+    )
+
+    assert profiles == [
+        {
+            "account_id": "user-010",
+            "profile_url": "https://www.xiaohongshu.com/user/profile/user-010?xsec_source=pc_search",
+            "nickname": "美妆博主A",
+        }
+    ]
+
+
 def test_is_relevant_creator_candidate_accepts_same_domain_synonyms():
     from red_crawler.crawl.similar import (
         build_search_queries,

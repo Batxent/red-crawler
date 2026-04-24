@@ -9,6 +9,7 @@ from typing import Iterable, Sequence
 
 from red_crawler.crawl.similar import SEARCH_QUERY_GROUPS, TOPIC_QUERY_HINTS
 from red_crawler.models import AccountRecord, ContactLead, CrawlResult
+from red_crawler.profile_url import canonicalize_profile_url
 
 
 def _ensure_utc(value: datetime | None) -> datetime:
@@ -88,6 +89,13 @@ class WeeklyGrowthReport:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass
+class CollectWindowUsage:
+    run_count: int
+    attempted_accounts: int
+    processed_search_terms: int
 
 
 class CrawlerStore:
@@ -622,6 +630,7 @@ class CrawlerStore:
         min_relevance_score: float = 0.0,
         limit: int = 100,
     ) -> list[ContactableCreator]:
+        fetch_limit = max(limit * 5, limit)
         with self.connect() as conn:
             rows = conn.execute(
                 """
@@ -676,26 +685,35 @@ class CrawlerStore:
                     creator_segment,
                     min_relevance_score,
                     lead_type,
-                    limit,
+                    fetch_limit,
                 ),
             ).fetchall()
 
-        return [
-            ContactableCreator(
-                account_id=row["account_id"],
-                profile_url=row["profile_url"],
-                nickname=row["nickname"],
-                bio_text=row["bio_text"],
-                creator_segment=row["creator_segment"],
-                relevance_score=float(row["relevance_score"]),
-                email=row["email"],
-                email_confidence=float(row["email_confidence"]),
-                lead_count=int(row["lead_count"]),
-                first_email_seen_at=row["first_email_seen_at"],
-                last_seen_at=row["last_seen_at"],
+        deduped: list[ContactableCreator] = []
+        seen_profile_urls: set[str] = set()
+        for row in rows:
+            profile_key = canonicalize_profile_url(row["profile_url"])
+            if profile_key in seen_profile_urls:
+                continue
+            seen_profile_urls.add(profile_key)
+            deduped.append(
+                ContactableCreator(
+                    account_id=row["account_id"],
+                    profile_url=row["profile_url"],
+                    nickname=row["nickname"],
+                    bio_text=row["bio_text"],
+                    creator_segment=row["creator_segment"],
+                    relevance_score=float(row["relevance_score"]),
+                    email=row["email"],
+                    email_confidence=float(row["email_confidence"]),
+                    lead_count=int(row["lead_count"]),
+                    first_email_seen_at=row["first_email_seen_at"],
+                    last_seen_at=row["last_seen_at"],
+                )
             )
-            for row in rows
-        ]
+            if len(deduped) >= limit:
+                break
+        return deduped
 
     def seed_default_search_terms(self, *, now: datetime | None = None) -> None:
         seed_terms = list(SEARCH_QUERY_GROUPS["beauty"])
@@ -815,6 +833,42 @@ class CrawlerStore:
                 (run_id, term, candidate_count, new_contactable_count, now_iso),
             )
 
+    def get_collect_window_usage(
+        self,
+        *,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> CollectWindowUsage:
+        start_iso = _isoformat(window_start)
+        end_iso = _isoformat(window_end)
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select attempted_accounts, processed_search_terms_json
+                from crawl_runs
+                where run_type = 'collect_nightly'
+                  and started_at >= ?
+                  and started_at < ?
+                """,
+                (start_iso, end_iso),
+            ).fetchall()
+
+        attempted_accounts = 0
+        processed_search_terms = 0
+        for row in rows:
+            attempted_accounts += int(row["attempted_accounts"] or 0)
+            try:
+                processed_search_terms += len(
+                    json.loads(row["processed_search_terms_json"] or "[]")
+                )
+            except Exception:
+                continue
+        return CollectWindowUsage(
+            run_count=len(rows),
+            attempted_accounts=attempted_accounts,
+            processed_search_terms=processed_search_terms,
+        )
+
     def enqueue_discovery_candidates(
         self,
         candidates: Sequence[dict[str, object]],
@@ -838,8 +892,9 @@ class CrawlerStore:
                     select id, status, priority
                     from discovery_queue
                     where profile_url = ?
+                       or (? != '' and account_id = ?)
                     """,
-                    (profile_url,),
+                    (profile_url, account_id, account_id),
                 ).fetchone()
                 if existing is None:
                     conn.execute(
@@ -872,6 +927,7 @@ class CrawlerStore:
                     """
                     update discovery_queue
                     set account_id = case when account_id = '' then ? else account_id end,
+                        profile_url = case when account_id = ? then ? else profile_url end,
                         source_type = ?,
                         source_seed_account_id = ?,
                         search_term = case when search_term = '' then ? else search_term end,
@@ -879,10 +935,12 @@ class CrawlerStore:
                         status = ?,
                         next_attempt_at = case when ? = 'pending' then ? else next_attempt_at end,
                         last_seen_at = ?
-                    where profile_url = ?
+                    where id = ?
                     """,
                     (
                         account_id,
+                        account_id,
+                        profile_url,
                         source_type,
                         source_seed_account_id,
                         search_term,
@@ -891,7 +949,7 @@ class CrawlerStore:
                         next_status,
                         now_iso,
                         now_iso,
-                        profile_url,
+                        int(existing["id"]),
                     ),
                 )
         return inserted

@@ -98,3 +98,24 @@ def test_parse_profile_html_extracts_real_xiaohongshu_profile_markup():
         "followers": "35.1万",
         "likes_and_collects": "276.5万",
     }
+
+
+def test_parse_profile_html_uses_user_id_when_profile_url_contains_note_id():
+    html = """
+    <section class="profile">
+      <h1 class="user-name">Mia</h1>
+      <div class="user-bio">护肤博主</div>
+    </section>
+    """
+
+    profile = parse_profile_html(
+        html=html,
+        profile_url=(
+            "https://www.xiaohongshu.com/user/profile/"
+            "user-001/63184102000000001103a3e7?xsec_token=abc&xsec_source=pc_user"
+        ),
+        source_type="seed",
+        source_from=None,
+    )
+
+    assert profile.account_id == "user-001"

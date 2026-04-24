@@ -232,6 +232,31 @@ def test_playwright_crawler_client_caches_profile_and_search_results(monkeypatch
     assert calls == {"profile": 1, "search": 1}
 
 
+def test_playwright_crawler_client_uses_configured_search_scroll_rounds(monkeypatch):
+    class DummySession:
+        def new_page(self):
+            raise AssertionError("network should not be used in this test")
+
+    client = PlaywrightCrawlerClient(
+        DummySession(),
+        safe_mode=False,
+        search_scroll_rounds=6,
+    )
+    captured = {}
+
+    def fake_load_search_result_htmls(url, scroll_rounds=3):
+        captured["url"] = url
+        captured["scroll_rounds"] = scroll_rounds
+        return [f"search:{url}"]
+
+    monkeypatch.setattr(client, "_load_search_result_htmls", fake_load_search_result_htmls)
+
+    assert client.fetch_search_result_htmls("抗痘博主") == [
+        "search:https://www.xiaohongshu.com/search_result?keyword=%E6%8A%97%E7%97%98%E5%8D%9A%E4%B8%BB&source=web_explore_feed"
+    ]
+    assert captured["scroll_rounds"] == 6
+
+
 def test_playwright_crawler_client_persists_disk_cache(tmp_path, monkeypatch):
     class DummySession:
         def new_page(self):

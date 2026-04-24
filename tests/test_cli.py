@@ -266,6 +266,107 @@ def test_cli_crawl_seed_can_disable_safe_mode(tmp_path, monkeypatch):
     assert captured["seed_url"] == "https://www.xiaohongshu.com/user/profile/user-001"
 
 
+def test_cli_crawl_search_exports_and_persists_result(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_run_crawl_search(config):
+        captured["search_term"] = config.search_term
+        captured["max_accounts"] = config.max_accounts
+        captured["search_scroll_rounds"] = config.search_scroll_rounds
+        captured["min_followers"] = config.min_followers
+        captured["min_relevance_score"] = config.min_relevance_score
+        captured["creator_only"] = config.creator_only
+        captured["safe_mode"] = config.safe_mode
+        return CrawlResult(
+            accounts=[
+                AccountRecord(
+                    account_id="user-201",
+                    profile_url="https://www.xiaohongshu.com/user/profile/user-201",
+                    nickname="A",
+                    bio_text="抗痘护肤博主 邮箱：a@example.com",
+                    visible_metadata={"tags": ["护肤博主"]},
+                    source_type="search_result",
+                    source_from=None,
+                    crawl_status="success",
+                    crawl_error=None,
+                )
+            ],
+            contact_leads=[
+                ContactLead(
+                    account_id="user-201",
+                    lead_type="email",
+                    normalized_value="a@example.com",
+                    raw_snippet="a@example.com",
+                    confidence=0.98,
+                    extractor_name="email_regex",
+                    source_field="bio",
+                    dedupe_key="email:a@example.com",
+                )
+            ],
+            run_report=RunReport(
+                seed_url="search:抗痘博主",
+                attempted_accounts=1,
+                succeeded_accounts=1,
+                failed_accounts=0,
+                lead_counts={"email": 1},
+                errors=[],
+            ),
+        )
+
+    class FakeStore:
+        def __init__(self, db_path):
+            captured["db_path"] = db_path
+
+        def record_crawl_result(self, result, run_type, safe_mode, started_at):
+            captured["run_type"] = run_type
+            captured["persist_safe_mode"] = safe_mode
+            captured["seed_url"] = result.run_report.seed_url
+            captured["started_at"] = started_at
+            return 1
+
+    monkeypatch.setattr("red_crawler.cli.run_crawl_search", fake_run_crawl_search)
+    monkeypatch.setattr("red_crawler.cli.CrawlerStore", FakeStore)
+
+    exit_code = main(
+        [
+            "crawl-search",
+            "--search-term",
+            "抗痘博主",
+            "--storage-state",
+            "state.json",
+            "--max-accounts",
+            "8",
+            "--search-scroll-rounds",
+            "6",
+            "--min-followers",
+            "5000",
+            "--min-relevance-score",
+            "0.7",
+            "--creator-only",
+            "--db-path",
+            str(tmp_path / "red-crawler.db"),
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["search_term"] == "抗痘博主"
+    assert captured["max_accounts"] == 8
+    assert captured["search_scroll_rounds"] == 6
+    assert captured["min_followers"] == 5000
+    assert captured["min_relevance_score"] == 0.7
+    assert captured["creator_only"] is True
+    assert captured["safe_mode"] is True
+    assert captured["db_path"] == tmp_path / "red-crawler.db"
+    assert captured["run_type"] == "crawl_search"
+    assert captured["persist_safe_mode"] is True
+    assert captured["seed_url"] == "search:抗痘博主"
+    assert (tmp_path / "accounts.csv").exists()
+    assert (tmp_path / "contact_leads.csv").exists()
+    assert (tmp_path / "run_report.json").exists()
+
+
 def test_cli_collect_nightly_runs_worker(tmp_path, monkeypatch):
     captured = {}
 
@@ -274,6 +375,8 @@ def test_cli_collect_nightly_runs_worker(tmp_path, monkeypatch):
         captured["db_path"] = config.db_path
         captured["report_dir"] = config.report_dir
         captured["crawl_budget"] = config.crawl_budget
+        captured["daily_account_budget"] = config.daily_account_budget
+        captured["daily_search_term_budget"] = config.daily_search_term_budget
         captured["startup_jitter_minutes"] = config.startup_jitter_minutes
         captured["slot_name"] = config.slot_name
         return object()
@@ -291,6 +394,10 @@ def test_cli_collect_nightly_runs_worker(tmp_path, monkeypatch):
             str(tmp_path / "reports"),
             "--crawl-budget",
             "30",
+            "--daily-account-budget",
+            "14",
+            "--daily-search-term-budget",
+            "3",
             "--startup-jitter-minutes",
             "25",
             "--slot-name",
@@ -304,8 +411,49 @@ def test_cli_collect_nightly_runs_worker(tmp_path, monkeypatch):
         "db_path": str(tmp_path / "red-crawler.db"),
         "report_dir": str(tmp_path / "reports"),
         "crawl_budget": 30,
+        "daily_account_budget": 14,
+        "daily_search_term_budget": 3,
         "startup_jitter_minutes": 25,
         "slot_name": "morning",
+    }
+
+
+def test_cli_crawl_discover_runs_worker_without_seed_url(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_run_nightly_collection(config):
+        captured["storage_state"] = config.storage_state
+        captured["db_path"] = config.db_path
+        captured["report_dir"] = config.report_dir
+        captured["crawl_budget"] = config.crawl_budget
+        captured["search_term_limit"] = config.search_term_limit
+        return object()
+
+    monkeypatch.setattr("red_crawler.cli.run_nightly_collection", fake_run_nightly_collection)
+
+    exit_code = main(
+        [
+            "crawl-discover",
+            "--storage-state",
+            "state.json",
+            "--db-path",
+            str(tmp_path / "red-crawler.db"),
+            "--report-dir",
+            str(tmp_path / "reports"),
+            "--crawl-budget",
+            "6",
+            "--search-term-limit",
+            "1",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured == {
+        "storage_state": "state.json",
+        "db_path": str(tmp_path / "red-crawler.db"),
+        "report_dir": str(tmp_path / "reports"),
+        "crawl_budget": 6,
+        "search_term_limit": 1,
     }
 
 

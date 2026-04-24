@@ -1,4 +1,5 @@
 from red_crawler.store.database import (
+    CollectWindowUsage,
     ContactableCreator,
     CrawlerStore,
     DiscoveryQueueItem,
@@ -7,6 +8,7 @@ from red_crawler.store.database import (
 )
 
 __all__ = [
+    "CollectWindowUsage",
     "ContactableCreator",
     "CrawlerStore",
     "DiscoveryQueueItem",

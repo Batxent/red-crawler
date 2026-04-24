@@ -25,7 +25,13 @@
     <string>--cache-dir</string>
     <string>/Users/tommy/Documents/GitHubOpenSources/red-crawler/.cache/red-crawler</string>
     <string>--crawl-budget</string>
-    <string>30</string>
+    <string>12</string>
+    <string>--daily-account-budget</string>
+    <string>12</string>
+    <string>--daily-search-term-budget</string>
+    <string>2</string>
+    <string>--startup-jitter-minutes</string>
+    <string>90</string>
   </array>
 
   <key>StartCalendarInterval</key>
