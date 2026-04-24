@@ -107,11 +107,14 @@ def test_safe_mode_controller_uses_wider_before_request_sleep_window():
 def test_safe_mode_controller_adds_post_load_dwell_and_scroll():
     sleeps = []
     logs = []
-    actions = []
+    mouse_moves = []
+    mouse_wheels = []
 
     class FakeRandom:
         def __init__(self):
-            self.uniform_values = iter([14.2, 0.44, 3.1, 5.6])
+            self.uniform_values = iter(
+                [14.2, 1.2, 0.45, 0.38, 6.2, 0.18, 3.1, 1.1, 0.52, 0.44, 7.1, 0.26, 5.6]
+            )
             self.random_values = iter([0.2, 0.3])
 
         def uniform(self, _start, _end):
@@ -121,8 +124,15 @@ def test_safe_mode_controller_adds_post_load_dwell_and_scroll():
             return next(self.random_values)
 
     class FakePage:
-        def evaluate(self, script):
-            actions.append(script)
+        viewport_size = {"width": 1280, "height": 900}
+        mouse = type(
+            "Mouse",
+            (),
+            {
+                "move": lambda _self, x, y, steps: mouse_moves.append((x, y, steps)),
+                "wheel": lambda _self, dx, dy: mouse_wheels.append((dx, dy)),
+            },
+        )()
 
     controller = SafeModeController(
         enabled=True,
@@ -134,14 +144,15 @@ def test_safe_mode_controller_adds_post_load_dwell_and_scroll():
     controller.after_page_load(FakePage(), page_kind="profile")
 
     assert sleeps == [14.2, 3.1, 5.6]
-    assert actions == [
-        "window.scrollTo(0, document.body.scrollHeight * 0.44)",
-        "window.scrollTo(0, document.body.scrollHeight)",
+    assert mouse_wheels == [
+        (0, 405),
+        (0, 468),
     ]
+    assert len(mouse_moves) == 2
     assert logs == [
         "safe-mode: dwelling 14.2s on profile page",
-        "safe-mode: settling for 3.1s after partial scroll on profile page",
-        "safe-mode: settling for 5.6s after deep scroll on profile page",
+        "safe-mode: settling for 3.1s after scroll step 1 on profile page",
+        "safe-mode: settling for 5.6s after scroll step 1 on profile page",
     ]
 
 
@@ -164,6 +175,137 @@ def test_safe_mode_controller_adds_search_scroll_settle():
 
     assert sleeps == [4.7]
     assert logs == ["safe-mode: settling for 4.7s after search scroll #2"]
+
+
+def test_safe_mode_controller_performs_human_search_scroll():
+    sleeps = []
+    logs = []
+    mouse_moves = []
+    mouse_wheels = []
+
+    class FakeRandom:
+        def __init__(self):
+            self.uniform_values = iter([1.4, 0.43, 0.31, 5.8, 0.18, 1.5, 1.8])
+            self.random_values = iter([0.6])
+
+        def uniform(self, _start, _end):
+            return next(self.uniform_values)
+
+        def random(self):
+            return next(self.random_values)
+
+    class FakePage:
+        viewport_size = {"width": 1280, "height": 900}
+        mouse = type(
+            "Mouse",
+            (),
+            {
+                "move": lambda _self, x, y, steps: mouse_moves.append((x, y, steps)),
+                "wheel": lambda _self, dx, dy: mouse_wheels.append((dx, dy)),
+            },
+        )()
+
+    controller = SafeModeController(
+        enabled=True,
+        sleep_fn=sleeps.append,
+        log_fn=logs.append,
+        rng=FakeRandom(),
+    )
+
+    controller.perform_search_scroll(FakePage(), round_number=2)
+
+    assert mouse_wheels == [
+        (0, 387),
+    ]
+    assert len(mouse_moves) == 1
+    assert sleeps == [1.5, 1.8]
+    assert logs == [
+        "safe-mode: settling for 1.5s after scroll step 1 on search page",
+        "safe-mode: settling for 1.8s after search scroll #2",
+    ]
+
+
+def test_safe_mode_controller_inspects_search_result_before_click():
+    sleeps = []
+    logs = []
+    hover_calls = []
+    mouse_moves = []
+
+    class FakeRandom:
+        def __init__(self):
+            self.uniform_values = iter([1.3, 0.52, 0.61, 6.2])
+
+        def uniform(self, _start, _end):
+            return next(self.uniform_values)
+
+    class FakeMouse:
+        def move(self, x, y, steps):
+            mouse_moves.append((x, y, steps))
+
+    class FakePage:
+        mouse = FakeMouse()
+
+    class FakeAnchor:
+        def scroll_into_view_if_needed(self, timeout):
+            hover_calls.append(("scroll", timeout))
+
+        def hover(self, timeout):
+            hover_calls.append(("hover", timeout))
+
+        def bounding_box(self):
+            return {"x": 10, "y": 20, "width": 100, "height": 80}
+
+    controller = SafeModeController(
+        enabled=True,
+        sleep_fn=sleeps.append,
+        log_fn=logs.append,
+        rng=FakeRandom(),
+    )
+
+    controller.inspect_search_result(FakePage(), FakeAnchor(), result_index=3)
+
+    assert hover_calls == [("hover", 5000)]
+    assert sleeps == [1.3]
+    assert logs == ["safe-mode: pausing 1.3s while inspecting search result #3"]
+    assert mouse_moves == [(62.0, 68.8, 6)]
+
+
+def test_safe_mode_controller_reorients_on_search_page():
+    sleeps = []
+    logs = []
+    mouse_wheels = []
+
+    class FakeRandom:
+        def __init__(self):
+            self.uniform_values = iter([0.08, 1.4])
+            self.random_values = iter([0.4, 0.7])
+
+        def uniform(self, _start, _end):
+            return next(self.uniform_values)
+
+        def random(self):
+            return next(self.random_values)
+
+    class FakePage:
+        viewport_size = {"width": 1280, "height": 900}
+        mouse = type(
+            "Mouse",
+            (),
+            {"wheel": lambda _self, dx, dy: mouse_wheels.append((dx, dy))},
+        )()
+
+    controller = SafeModeController(
+        enabled=True,
+        sleep_fn=sleeps.append,
+        log_fn=logs.append,
+        rng=FakeRandom(),
+    )
+
+    controller.reorient_on_search_page(FakePage())
+
+    assert mouse_wheels == [(0, 72)]
+    assert sleeps == [1.4]
+    assert logs == ["safe-mode: settling for 1.4s while reorienting on search page"]
 
 
 def test_safe_mode_controller_triggers_circuit_breaker_after_repeated_risk_events():
@@ -219,6 +361,7 @@ def test_playwright_crawler_client_caches_profile_and_search_results(monkeypatch
         return [f"search:{url}"]
 
     monkeypatch.setattr(client, "_load_html", fake_load_html)
+    monkeypatch.setattr(client, "_load_search_result_htmls_via_ui", lambda query, scroll_rounds=3: None)
     monkeypatch.setattr(client, "_load_search_result_htmls", fake_load_search_result_htmls)
 
     assert client.fetch_profile_html("https://example.com/u1") == "profile:https://example.com/u1"
@@ -249,12 +392,417 @@ def test_playwright_crawler_client_uses_configured_search_scroll_rounds(monkeypa
         captured["scroll_rounds"] = scroll_rounds
         return [f"search:{url}"]
 
+    monkeypatch.setattr(client, "_load_search_result_htmls_via_ui", lambda query, scroll_rounds=3: None)
     monkeypatch.setattr(client, "_load_search_result_htmls", fake_load_search_result_htmls)
 
     assert client.fetch_search_result_htmls("抗痘博主") == [
         "search:https://www.xiaohongshu.com/search_result?keyword=%E6%8A%97%E7%97%98%E5%8D%9A%E4%B8%BB&source=web_explore_feed"
     ]
     assert captured["scroll_rounds"] == 6
+
+
+def test_playwright_crawler_client_searches_via_site_input_before_fallback():
+    class DummyResponse:
+        status = 200
+
+    class DummyBodyLocator:
+        def __init__(self, page):
+            self.page = page
+
+        def inner_text(self):
+            return self.page.body_text
+
+    class EmptyLocator:
+        def count(self):
+            return 0
+
+    class DummySingleLocator:
+        def __init__(self, box):
+            self.box = box
+
+        def count(self):
+            return 1
+
+        def nth(self, _index):
+            return self
+
+        def bounding_box(self):
+            return self.box
+
+        def scroll_into_view_if_needed(self, timeout):
+            return None
+
+    class DummySearchLocator:
+        def __init__(self, page):
+            self.page = page
+
+        def count(self):
+            return len(self.page.search_hrefs)
+
+        def nth(self, index):
+            return DummySingleLocator(
+                {"x": 80 + index * 40, "y": 220, "width": 120, "height": 90}
+            )
+
+    class DummyKeyboard:
+        def __init__(self, page):
+            self.page = page
+            self.presses = []
+            self.typed = []
+
+        def press(self, key):
+            self.presses.append(key)
+            if key == "Enter":
+                self.page.body_text = "search page body"
+                self.page.submitted_queries.append("".join(self.typed))
+
+        def type(self, text, delay):
+            self.page.type_delays.append(delay)
+            self.typed.append(text)
+
+    class DummyPage:
+        def __init__(self):
+            self.goto_calls = []
+            self.closed = False
+            self.body_text = "home page body"
+            self.submitted_queries = []
+            self.type_delays = []
+            self.search_hrefs = ["/user/profile/user-101?xsec_source=pc_search"]
+            self.mouse_clicks = []
+            self.mouse = type(
+                "Mouse",
+                (),
+                {
+                    "move": lambda _self, x, y, steps: None,
+                    "click": lambda _self, x, y, delay=0: self.mouse_clicks.append((x, y, delay)),
+                    "wheel": lambda _self, dx, dy: None,
+                },
+            )()
+            self.keyboard = DummyKeyboard(self)
+
+        def goto(self, url, wait_until, timeout):
+            self.goto_calls.append(url)
+            self.body_text = "home page body"
+            return DummyResponse()
+
+        def wait_for_load_state(self, _state, timeout):
+            return None
+
+        def locator(self, selector):
+            if selector == "body":
+                return DummyBodyLocator(self)
+            if selector == "input[type='search']" and self.body_text == "home page body":
+                return DummySingleLocator({"x": 20, "y": 24, "width": 240, "height": 32})
+            if selector == ".card-bottom-wrapper a.author[href*='/user/profile/']" and self.body_text == "search page body":
+                return DummySearchLocator(self)
+            return EmptyLocator()
+
+        def content(self):
+            if self.body_text == "search page body":
+                return """
+                <div class="card-bottom-wrapper">
+                  <a class="author" href="/user/profile/user-101?xsec_source=pc_search">A</a>
+                </div>
+                """
+            return "<html><body>home</body></html>"
+
+        def wait_for_timeout(self, _ms):
+            return None
+
+        def is_closed(self):
+            return self.closed
+
+    class DummySession:
+        def __init__(self):
+            self.page = DummyPage()
+
+        def new_page(self):
+            return self.page
+
+    client = PlaywrightCrawlerClient(DummySession(), safe_mode=False)
+
+    htmls = client.fetch_search_result_htmls("抗痘博主")
+
+    assert htmls == [
+        """
+                <div class="card-bottom-wrapper">
+                  <a class="author" href="/user/profile/user-101?xsec_source=pc_search">A</a>
+                </div>
+                """
+    ]
+    assert client._page.goto_calls == ["https://www.xiaohongshu.com"]
+    assert client._page.submitted_queries == ["抗痘博主"]
+    assert "Enter" in client._page.keyboard.presses
+    assert len(client._page.mouse_clicks) == 1
+
+
+def test_playwright_crawler_client_reuses_same_page_across_requests():
+    class DummyResponse:
+        status = 200
+
+    class DummyLocator:
+        def inner_text(self):
+            return "正常内容"
+
+        def count(self):
+            return 1
+
+    class DummyPage:
+        def __init__(self):
+            self.goto_calls = []
+            self.closed = False
+
+        def goto(self, url, wait_until, timeout):
+            self.goto_calls.append(url)
+            return DummyResponse()
+
+        def wait_for_load_state(self, _state, timeout):
+            return None
+
+        def locator(self, _selector):
+            return DummyLocator()
+
+        def content(self):
+            return "<html></html>"
+
+        def evaluate(self, _script):
+            return None
+
+        def wait_for_timeout(self, _ms):
+            return None
+
+        def is_closed(self):
+            return self.closed
+
+    class DummySession:
+        def __init__(self):
+            self.created_pages = []
+
+        def new_page(self):
+            page = DummyPage()
+            self.created_pages.append(page)
+            return page
+
+    session = DummySession()
+    client = PlaywrightCrawlerClient(
+        session,
+        safe_mode=True,
+        safe_mode_controller=SafeModeController(
+            enabled=True,
+            sleep_fn=lambda _seconds: None,
+            log_fn=lambda _message: None,
+        ),
+    )
+
+    assert client.fetch_profile_html("https://example.com/u1") == "<html></html>"
+    assert client.fetch_profile_html("https://example.com/u2") == "<html></html>"
+
+    assert len(session.created_pages) == 1
+    assert session.created_pages[0].goto_calls == [
+        "https://example.com/u1",
+        "https://example.com/u2",
+    ]
+
+
+def test_playwright_crawler_client_clicks_profiles_from_active_search_page():
+    class DummyResponse:
+        status = 200
+
+    class DummyBodyLocator:
+        def __init__(self, page):
+            self.page = page
+
+        def inner_text(self):
+            return self.page.body_text
+
+    class EmptyLocator:
+        def count(self):
+            return 0
+
+    class DummySingleLocator:
+        def __init__(self, box):
+            self.box = box
+
+        def count(self):
+            return 1
+
+        def nth(self, _index):
+            return self
+
+        def bounding_box(self):
+            return self.box
+
+        def scroll_into_view_if_needed(self, timeout):
+            return None
+
+    class DummySearchAnchor:
+        def __init__(self, page, href):
+            self.page = page
+            self.href = href
+            self.hover_calls = []
+
+        def get_attribute(self, name):
+            assert name == "href"
+            return self.href
+
+        def hover(self, timeout):
+            self.hover_calls.append(timeout)
+
+        def bounding_box(self):
+            return {"x": 10, "y": 20, "width": 120, "height": 90}
+
+    class DummySearchLocator:
+        def __init__(self, page):
+            self.page = page
+
+        def count(self):
+            return len(self.page.search_hrefs)
+
+        def nth(self, index):
+            anchor = DummySearchAnchor(self.page, self.page.search_hrefs[index])
+            self.page.anchors.append(anchor)
+            return anchor
+
+    class DummyPage:
+        def __init__(self):
+            self.goto_calls = []
+            self.go_back_calls = 0
+            self.click_calls = []
+            self.back_clicks = 0
+            self.closed = False
+            self.body_text = "home page body"
+            self.anchors = []
+            self.search_hrefs = [
+                "/user/profile/user-101?xsec_source=pc_search",
+                "/user/profile/user-102?xsec_source=pc_search",
+            ]
+            self.mouse_moves = []
+            self.mouse_clicks = []
+            self.mouse_wheels = []
+            self.search_queries = []
+            self.mouse = type(
+                "Mouse",
+                (),
+                {
+                    "move": lambda _self, x, y, steps: self.mouse_moves.append((x, y, steps)),
+                    "click": lambda _self, x, y, delay=0: self._handle_mouse_click(x, y, delay),
+                    "wheel": lambda _self, dx, dy: self.mouse_wheels.append((dx, dy)),
+                },
+            )()
+            self.keyboard = type(
+                "Keyboard",
+                (),
+                {
+                    "press": lambda _self, key: self._handle_key_press(key),
+                    "type": lambda _self, text, delay=0: self._handle_type(text, delay),
+                },
+            )()
+
+        def goto(self, url, wait_until, timeout):
+            self.goto_calls.append(url)
+            self.body_text = "home page body"
+            return DummyResponse()
+
+        def wait_for_load_state(self, _state, timeout):
+            return None
+
+        def locator(self, selector):
+            if selector == "body":
+                return DummyBodyLocator(self)
+            if selector == "input[type='search']" and self.body_text in {"home page body", "search page body"}:
+                return DummySingleLocator({"x": 20, "y": 24, "width": 240, "height": 32})
+            if selector == ".card-bottom-wrapper a.author[href*='/user/profile/']" and self.body_text == "search page body":
+                return DummySearchLocator(self)
+            if selector == "button[aria-label='返回']" and self.body_text == "profile page body":
+                return DummySingleLocator({"x": 18, "y": 18, "width": 28, "height": 28})
+            return EmptyLocator()
+
+        def content(self):
+            if self.body_text == "search page body":
+                return """
+                <div class="note-item">
+                  <div class="footer">
+                    <div class="card-bottom-wrapper">
+                      <a class="author" href="/user/profile/user-101?xsec_source=pc_search">A</a>
+                      <a class="author" href="/user/profile/user-102?xsec_source=pc_search">B</a>
+                    </div>
+                  </div>
+                </div>
+                """
+            return "<html><body>profile page body</body></html>"
+
+        def evaluate(self, _script):
+            return None
+
+        def wait_for_timeout(self, _ms):
+            return None
+
+        def is_closed(self):
+            return self.closed
+
+        def go_back(self, wait_until, timeout):
+            self.go_back_calls += 1
+            self.body_text = "search page body"
+            return DummyResponse()
+
+        def _handle_mouse_click(self, x, y, delay):
+            self.mouse_clicks.append((x, y, delay))
+            if self.body_text == "home page body":
+                return
+            if self.body_text == "profile page body":
+                self.back_clicks += 1
+                self.body_text = "search page body"
+                return
+            href = self.search_hrefs[len(self.click_calls)]
+            self.click_calls.append((href, delay))
+            self.body_text = "profile page body"
+
+        def _handle_type(self, text, delay):
+            self.search_queries.append((text, delay))
+
+        def _handle_key_press(self, key):
+            if key == "Enter":
+                self.body_text = "search page body"
+
+    class DummySession:
+        def __init__(self):
+            self.created_pages = []
+
+        def new_page(self):
+            page = DummyPage()
+            self.created_pages.append(page)
+            return page
+
+    session = DummySession()
+    client = PlaywrightCrawlerClient(
+        session,
+        safe_mode=True,
+        safe_mode_controller=SafeModeController(
+            enabled=True,
+            sleep_fn=lambda _seconds: None,
+            log_fn=lambda _message: None,
+        ),
+    )
+
+    client.fetch_search_result_htmls("抗痘博主")
+    client.fetch_profile_html("https://www.xiaohongshu.com/user/profile/user-101?xsec_source=pc_search")
+    client.fetch_profile_html("https://www.xiaohongshu.com/user/profile/user-102?xsec_source=pc_search")
+
+    assert len(session.created_pages) == 1
+    page = session.created_pages[0]
+    assert page.goto_calls == [
+        "https://www.xiaohongshu.com"
+    ]
+    assert [item[0] for item in page.search_queries] == ["抗痘博主"]
+    assert [item[0] for item in page.click_calls] == [
+        "/user/profile/user-101?xsec_source=pc_search",
+        "/user/profile/user-102?xsec_source=pc_search",
+    ]
+    assert len(page.mouse_clicks) == 4
+    assert page.back_clicks == 1
+    assert page.go_back_calls == 0
+    assert len(page.anchors) >= 2
+    assert page.anchors[0].hover_calls == [5000]
 
 
 def test_playwright_crawler_client_persists_disk_cache(tmp_path, monkeypatch):
@@ -284,6 +832,7 @@ def test_playwright_crawler_client_persists_disk_cache(tmp_path, monkeypatch):
         return [f"search:{url}:1", f"search:{url}:2"]
 
     monkeypatch.setattr(client, "_load_html", fake_load_html)
+    monkeypatch.setattr(client, "_load_search_result_htmls_via_ui", lambda query, scroll_rounds=3: None)
     monkeypatch.setattr(client, "_load_search_result_htmls", fake_load_search_result_htmls)
 
     profile_url = "https://example.com/u1"
@@ -307,6 +856,7 @@ def test_playwright_crawler_client_persists_disk_cache(tmp_path, monkeypatch):
         raise AssertionError("should have loaded search results from disk cache")
 
     monkeypatch.setattr(cold_client, "_load_html", fail_load_html)
+    monkeypatch.setattr(cold_client, "_load_search_result_htmls_via_ui", lambda query, scroll_rounds=3: None)
     monkeypatch.setattr(cold_client, "_load_search_result_htmls", fail_load_search_result_htmls)
 
     assert cold_client.fetch_profile_html(profile_url) == f"profile:{profile_url}"
