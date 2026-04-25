@@ -3,8 +3,10 @@
 import red_crawler.session as session_module
 from red_crawler.session import (
     BrowserSession,
+    build_mouse_backend,
     apply_stealth,
     classify_high_risk_page,
+    OSMouseBackend,
     PlaywrightCrawlerClient,
     RiskControlTriggered,
     SafeModeController,
@@ -46,6 +48,61 @@ def test_extract_note_detail_urls_prefers_profile_note_routes():
     assert urls == [
         "https://www.xiaohongshu.com/user/profile/user-001/63184102000000001103a3e7?xsec_token=abc&xsec_source=pc_user",
         "https://www.xiaohongshu.com/user/profile/user-001/69c0ff760000000022001b5d?xsec_token=def&xsec_source=pc_user",
+    ]
+
+
+def test_build_mouse_backend_rejects_unknown_mode():
+    try:
+        build_mouse_backend("invalid-mode")
+    except ValueError as exc:
+        assert str(exc) == "interaction_mode must be one of: playwright, os-mouse"
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_os_mouse_backend_uses_xdotool_commands():
+    commands = []
+
+    class Result:
+        def __init__(self, stdout=""):
+            self.stdout = stdout
+
+    def fake_run(argv, check, capture_output=False, text=False):
+        commands.append((argv, capture_output, text))
+        if argv[:2] == ["xdotool", "getmouselocation"]:
+            return Result("X=100\nY=200\n")
+        return Result()
+
+    class FakePage:
+        def evaluate(self, _script):
+            return {
+                "screenX": 20,
+                "screenY": 30,
+                "outerWidth": 1400,
+                "outerHeight": 1000,
+                "innerWidth": 1280,
+                "innerHeight": 900,
+            }
+
+    backend = OSMouseBackend(
+        run_fn=fake_run,
+        which_fn=lambda name: "/usr/bin/xdotool" if name == "xdotool" else None,
+        sleep_fn=lambda _seconds: None,
+        platform="linux",
+    )
+
+    backend.move(FakePage(), 50, 60, steps=2)
+    backend.click(FakePage(), 70, 80, delay_ms=0)
+    backend.wheel(FakePage(), delta_y=240)
+
+    assert commands == [
+        (["xdotool", "getmouselocation", "--shell"], True, True),
+        (["xdotool", "mousemove", "--sync", "115", "195"], False, False),
+        (["xdotool", "mousemove", "--sync", "130", "190"], False, False),
+        (["xdotool", "getmouselocation", "--shell"], True, True),
+        (["xdotool", "mousemove", "--sync", "150", "210"], False, False),
+        (["xdotool", "click", "1"], False, False),
+        (["xdotool", "click", "--repeat", "2", "--delay", "70", "5"], False, False),
     ]
 
 
@@ -268,6 +325,52 @@ def test_safe_mode_controller_inspects_search_result_before_click():
     assert sleeps == [1.3]
     assert logs == ["safe-mode: pausing 1.3s while inspecting search result #3"]
     assert mouse_moves == [(62.0, 68.8, 6)]
+
+
+def test_safe_mode_controller_skips_dom_hover_in_os_mouse_mode():
+    sleeps = []
+    hover_calls = []
+    move_calls = []
+
+    class FakeRandom:
+        def __init__(self):
+            self.uniform_values = iter([1.1, 0.5, 0.5, 5.0])
+
+        def uniform(self, _start, _end):
+            return next(self.uniform_values)
+
+    class FakeBackend:
+        drives_system_cursor = True
+
+        def move(self, page, x, y, *, steps):
+            move_calls.append((x, y, steps))
+
+        def click(self, page, x, y, *, delay_ms):
+            return True
+
+        def wheel(self, page, *, delta_y):
+            return True
+
+    class FakeAnchor:
+        def hover(self, timeout):
+            hover_calls.append(timeout)
+
+        def bounding_box(self):
+            return {"x": 10, "y": 20, "width": 100, "height": 80}
+
+    controller = SafeModeController(
+        enabled=True,
+        sleep_fn=sleeps.append,
+        log_fn=lambda _message: None,
+        rng=FakeRandom(),
+        mouse_backend=FakeBackend(),
+    )
+
+    controller.inspect_search_result(object(), FakeAnchor(), result_index=1)
+
+    assert hover_calls == []
+    assert sleeps == [1.1]
+    assert move_calls == [(60.0, 60.0, 5)]
 
 
 def test_safe_mode_controller_reorients_on_search_page():

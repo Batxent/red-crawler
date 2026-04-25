@@ -96,6 +96,7 @@ class NightlyCollectConfig:
     daily_account_budget: int = 12
     daily_search_term_budget: int = 2
     safe_mode: bool = True
+    interaction_mode: str = "playwright"
     cache_ttl_days: int = 7
     refresh_after_days: int = 14
     min_relevance_score: float = 0.7
@@ -457,6 +458,7 @@ def run_nightly_collection(config: NightlyCollectConfig) -> NightlyCollectResult
                 pause_every=2,
                 risk_threshold=1,
             ),
+            interaction_mode=config.interaction_mode,
             cache_dir=config.cache_dir,
             cache_ttl_days=config.cache_ttl_days,
         )

@@ -41,6 +41,7 @@ class CrawlConfig:
     max_depth: int = 2
     include_note_recommendations: bool = False
     safe_mode: bool = False
+    interaction_mode: str = "playwright"
     cache_dir: str | None = None
     cache_ttl_days: int = 7
     gender_filter: str | None = None
@@ -57,6 +58,7 @@ class SearchCrawlConfig:
     min_relevance_score: float = 0.0
     creator_only: bool = False
     safe_mode: bool = False
+    interaction_mode: str = "playwright"
     cache_dir: str | None = None
     cache_ttl_days: int = 7
     gender_filter: str | None = None
@@ -104,6 +106,7 @@ def run_crawl_seed(config: CrawlConfig) -> CrawlResult:
         client = PlaywrightCrawlerClient(
             session,
             safe_mode=config.safe_mode,
+            interaction_mode=config.interaction_mode,
             cache_dir=config.cache_dir,
             cache_ttl_days=config.cache_ttl_days,
         )
@@ -115,6 +118,7 @@ def run_crawl_search(config: SearchCrawlConfig) -> CrawlResult:
         client = PlaywrightCrawlerClient(
             session,
             safe_mode=config.safe_mode,
+            interaction_mode=config.interaction_mode,
             search_scroll_rounds=config.search_scroll_rounds,
             cache_dir=config.cache_dir,
             cache_ttl_days=config.cache_ttl_days,

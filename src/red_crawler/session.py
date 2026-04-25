@@ -6,12 +6,13 @@ import os
 import pickle
 import random
 import re
+import shutil
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List
+from typing import Callable, List, Protocol
 from urllib.parse import quote, urljoin
 
 from playwright.sync_api import BrowserContext, Page, Playwright, sync_playwright
@@ -64,6 +65,7 @@ BACK_BUTTON_SELECTORS = (
     ".left-area .back",
 )
 SEARCH_RESULT_CARD_SELECTOR = ".card-bottom-wrapper a.author[href*='/user/profile/']"
+SUPPORTED_INTERACTION_MODES = ("playwright", "os-mouse")
 
 
 def _get_or_create_fingerprint(storage_state_path: Path) -> Fingerprint:
@@ -93,12 +95,183 @@ def classify_high_risk_page(body_text: str) -> str | None:
     return None
 
 
+class MouseAutomationBackend(Protocol):
+    drives_system_cursor: bool
+
+    def move(self, page: Page, x: float, y: float, *, steps: int) -> None: ...
+
+    def click(self, page: Page, x: float, y: float, *, delay_ms: int) -> bool: ...
+
+    def wheel(self, page: Page, *, delta_y: int) -> bool: ...
+
+
+@dataclass
+class PlaywrightMouseBackend:
+    drives_system_cursor: bool = False
+
+    def move(self, page: Page, x: float, y: float, *, steps: int) -> None:
+        mouse = getattr(page, "mouse", None)
+        if mouse is None:
+            return
+        move = getattr(mouse, "move", None)
+        if callable(move):
+            move(x, y, steps=steps)
+
+    def click(self, page: Page, x: float, y: float, *, delay_ms: int) -> bool:
+        mouse = getattr(page, "mouse", None)
+        if mouse is None:
+            return False
+        click = getattr(mouse, "click", None)
+        if callable(click):
+            click(x, y, delay=delay_ms)
+            return True
+        down = getattr(mouse, "down", None)
+        up = getattr(mouse, "up", None)
+        if callable(down) and callable(up):
+            down()
+            up()
+            return True
+        return False
+
+    def wheel(self, page: Page, *, delta_y: int) -> bool:
+        mouse = getattr(page, "mouse", None)
+        if mouse is None:
+            return False
+        wheel = getattr(mouse, "wheel", None)
+        if callable(wheel):
+            wheel(0, delta_y)
+            return True
+        return False
+
+
+@dataclass
+class OSMouseBackend:
+    run_fn: Callable[..., object] = subprocess.run
+    which_fn: Callable[[str], str | None] = shutil.which
+    sleep_fn: Callable[[float], None] = time.sleep
+    platform: str = sys.platform
+    _xdotool_checked: bool = False
+    drives_system_cursor: bool = True
+
+    def _ensure_linux_xdotool(self) -> None:
+        if self.platform.startswith("linux"):
+            if not self._xdotool_checked:
+                if self.which_fn("xdotool") is None:
+                    raise RuntimeError(
+                        "interaction mode 'os-mouse' requires xdotool to be installed on Linux"
+                    )
+                self._xdotool_checked = True
+            return
+        raise RuntimeError(
+            f"interaction mode 'os-mouse' is currently supported only on Linux; current platform is {self.platform}"
+        )
+
+    def move(self, page: Page, x: float, y: float, *, steps: int) -> None:
+        self._ensure_linux_xdotool()
+        target_x, target_y = self._viewport_to_screen_point(page, x, y)
+        start_x, start_y = self._current_cursor_position()
+        step_count = max(1, steps)
+        for step_index in range(1, step_count + 1):
+            next_x = round(start_x + (target_x - start_x) * step_index / step_count)
+            next_y = round(start_y + (target_y - start_y) * step_index / step_count)
+            self._run_command(["xdotool", "mousemove", "--sync", str(next_x), str(next_y)])
+            if step_index < step_count:
+                self.sleep_fn(0.012)
+
+    def click(self, page: Page, x: float, y: float, *, delay_ms: int) -> bool:
+        self.move(page, x, y, steps=1)
+        if delay_ms > 0:
+            self.sleep_fn(delay_ms / 1000.0)
+        self._run_command(["xdotool", "click", "1"])
+        return True
+
+    def wheel(self, page: Page, *, delta_y: int) -> bool:
+        self._ensure_linux_xdotool()
+        repeats = max(1, min(12, round(abs(delta_y) / 120)))
+        button = "4" if delta_y < 0 else "5"
+        self._run_command(
+            ["xdotool", "click", "--repeat", str(repeats), "--delay", "70", button]
+        )
+        return True
+
+    def _current_cursor_position(self) -> tuple[int, int]:
+        result = self._run_command(
+            ["xdotool", "getmouselocation", "--shell"],
+            capture_output=True,
+        )
+        output = str(getattr(result, "stdout", "") or "")
+        x = 0
+        y = 0
+        for line in output.splitlines():
+            if line.startswith("X="):
+                x = int(line[2:])
+            elif line.startswith("Y="):
+                y = int(line[2:])
+        return x, y
+
+    def _viewport_to_screen_point(self, page: Page, x: float, y: float) -> tuple[int, int]:
+        metrics = page.evaluate(
+            """
+            () => ({
+              screenX: typeof window.screenX === "number" ? window.screenX : (window.screenLeft || 0),
+              screenY: typeof window.screenY === "number" ? window.screenY : (window.screenTop || 0),
+              outerWidth: typeof window.outerWidth === "number" ? window.outerWidth : window.innerWidth,
+              outerHeight: typeof window.outerHeight === "number" ? window.outerHeight : window.innerHeight,
+              innerWidth: typeof window.innerWidth === "number" ? window.innerWidth : 0,
+              innerHeight: typeof window.innerHeight === "number" ? window.innerHeight : 0
+            })
+            """
+        )
+        screen_x = int(metrics.get("screenX", 0))
+        screen_y = int(metrics.get("screenY", 0))
+        outer_width = int(metrics.get("outerWidth", 0))
+        outer_height = int(metrics.get("outerHeight", 0))
+        inner_width = int(metrics.get("innerWidth", 0))
+        inner_height = int(metrics.get("innerHeight", 0))
+        left_chrome = max(0, round((outer_width - inner_width) / 2))
+        top_chrome = max(0, outer_height - inner_height)
+        return (
+            screen_x + left_chrome + round(x),
+            screen_y + top_chrome + round(y),
+        )
+
+    def _run_command(self, argv: list[str], *, capture_output: bool = False) -> object:
+        kwargs = {"check": True}
+        if capture_output:
+            kwargs["capture_output"] = True
+            kwargs["text"] = True
+        return self.run_fn(argv, **kwargs)
+
+
+def build_mouse_backend(
+    interaction_mode: str,
+    *,
+    run_fn: Callable[..., object] = subprocess.run,
+    which_fn: Callable[[str], str | None] = shutil.which,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    platform: str = sys.platform,
+) -> MouseAutomationBackend:
+    if interaction_mode == "playwright":
+        return PlaywrightMouseBackend()
+    if interaction_mode == "os-mouse":
+        return OSMouseBackend(
+            run_fn=run_fn,
+            which_fn=which_fn,
+            sleep_fn=sleep_fn,
+            platform=platform,
+        )
+    raise ValueError(
+        f"interaction_mode must be one of: {', '.join(SUPPORTED_INTERACTION_MODES)}"
+    )
+
+
 @dataclass
 class SafeModeController:
     enabled: bool
     sleep_fn: Callable[[float], None] = time.sleep
     log_fn: Callable[[str], None] = lambda _message: None
     rng: random.Random = field(default_factory=random.Random)
+    mouse_backend: MouseAutomationBackend = field(default_factory=PlaywrightMouseBackend)
     pause_every: int = 4
     risk_threshold: int = 2
     request_count: int = 0
@@ -196,12 +369,13 @@ class SafeModeController:
     ) -> None:
         if not self.enabled:
             return
-        try:
-            hover = getattr(anchor, "hover", None)
-            if callable(hover):
-                hover(timeout=5000)
-        except Exception:
-            pass
+        if not self.mouse_backend.drives_system_cursor:
+            try:
+                hover = getattr(anchor, "hover", None)
+                if callable(hover):
+                    hover(timeout=5000)
+            except Exception:
+                pass
         hover_settle = self.rng.uniform(0.9, 2.4)
         self.log_fn(
             f"safe-mode: pausing {hover_settle:.1f}s while inspecting search result #{result_index}"
@@ -213,7 +387,8 @@ class SafeModeController:
             if box:
                 self._move_mouse_to_box(page, box)
         except Exception:
-            pass
+            if self.mouse_backend.drives_system_cursor:
+                raise
 
     def reorient_on_search_page(self, page: Page) -> None:
         if not self.enabled:
@@ -255,22 +430,18 @@ class SafeModeController:
             bounding_box = getattr(anchor, "bounding_box", None)
             box = bounding_box() if callable(bounding_box) else None
             if box:
-                x, y, steps = self._move_mouse_to_box(page, box)
-                mouse = getattr(page, "mouse", None)
-                if mouse is not None:
-                    click = getattr(mouse, "click", None)
-                    if callable(click):
-                        click(x, y, delay=round(self.rng.uniform(40, 140)))
-                        return True
-                    down = getattr(mouse, "down", None)
-                    up = getattr(mouse, "up", None)
-                    if callable(down) and callable(up):
-                        down()
-                        up()
-                        return True
+                x, y, _steps = self._move_mouse_to_box(page, box)
+                if self.mouse_backend.click(
+                    page,
+                    x,
+                    y,
+                    delay_ms=round(self.rng.uniform(40, 140)),
+                ):
+                    return True
         except Exception:
-            pass
-        if not self.enabled:
+            if self.mouse_backend.drives_system_cursor:
+                raise
+        if not self.enabled and not self.mouse_backend.drives_system_cursor:
             try:
                 click = getattr(anchor, "click", None)
                 if callable(click):
@@ -287,58 +458,44 @@ class SafeModeController:
             if not box:
                 return False
             x, y, _steps = self._move_mouse_to_box(page, box)
-            mouse = getattr(page, "mouse", None)
-            if mouse is None:
-                return False
-            click = getattr(mouse, "click", None)
-            if callable(click):
-                click(x, y, delay=round(self.rng.uniform(40, 140)))
-                return True
-            down = getattr(mouse, "down", None)
-            up = getattr(mouse, "up", None)
-            if callable(down) and callable(up):
-                down()
-                up()
-                return True
+            return self.mouse_backend.click(
+                page,
+                x,
+                y,
+                delay_ms=round(self.rng.uniform(40, 140)),
+            )
         except Exception:
-            pass
+            if self.mouse_backend.drives_system_cursor:
+                raise
         return False
 
     def _move_mouse_to_reading_zone(self, page: Page) -> None:
-        mouse = getattr(page, "mouse", None)
-        if mouse is None:
-            return
         width, height = self._viewport_dimensions(page)
         x_ratio = self.rng.uniform(0.34, 0.72)
         y_ratio = self.rng.uniform(0.18, 0.68)
         steps = max(4, int(self.rng.uniform(4, 10)))
         try:
-            mouse.move(width * x_ratio, height * y_ratio, steps=steps)
+            self.mouse_backend.move(page, width * x_ratio, height * y_ratio, steps=steps)
         except Exception:
-            pass
+            if self.mouse_backend.drives_system_cursor:
+                raise
 
     def _move_mouse_to_box(self, page: Page, box: dict[str, float]) -> tuple[float, float, int]:
-        mouse = getattr(page, "mouse", None)
         offset_x = self.rng.uniform(0.35, 0.68)
         offset_y = self.rng.uniform(0.28, 0.72)
         steps = max(4, int(self.rng.uniform(4, 10)))
         x = box["x"] + box["width"] * offset_x
         y = box["y"] + box["height"] * offset_y
-        if mouse is not None:
-            mouse.move(x, y, steps=steps)
+        self.mouse_backend.move(page, x, y, steps=steps)
         return x, y, steps
 
     def _wheel_scroll(self, page: Page, *, delta_ratio: float) -> None:
-        mouse = getattr(page, "mouse", None)
         _, height = self._viewport_dimensions(page)
         delta_y = max(1, int(abs(height * delta_ratio)))
         if delta_ratio < 0:
             delta_y = -delta_y
-        if mouse is not None:
-            wheel = getattr(mouse, "wheel", None)
-            if callable(wheel):
-                wheel(0, delta_y)
-                return
+        if self.mouse_backend.wheel(page, delta_y=delta_y):
+            return
         page.evaluate(
             "window.scrollBy(0, Math.round(window.innerHeight * %s))"
             % f"{delta_ratio:.2f}"
@@ -423,6 +580,8 @@ class PlaywrightCrawlerClient:
         base_url: str = "https://www.xiaohongshu.com",
         safe_mode: bool = False,
         safe_mode_controller: SafeModeController | None = None,
+        interaction_mode: str = "playwright",
+        mouse_backend: MouseAutomationBackend | None = None,
         search_scroll_rounds: int = 2,
         cache_dir: str | Path | None = None,
         cache_ttl_days: int = 7,
@@ -430,11 +589,15 @@ class PlaywrightCrawlerClient:
     ):
         self.session = session
         self.base_url = base_url.rstrip("/")
+        self.interaction_mode = interaction_mode
         self.search_scroll_rounds = max(int(search_scroll_rounds), 0)
+        self.mouse_backend = mouse_backend or build_mouse_backend(interaction_mode)
         self.safe_mode_controller = safe_mode_controller or SafeModeController(
             enabled=safe_mode,
             log_fn=print if safe_mode else (lambda _message: None),
+            mouse_backend=self.mouse_backend,
         )
+        self.safe_mode_controller.mouse_backend = self.mouse_backend
         self._profile_html_cache: dict[str, str] = {}
         self._search_html_cache: dict[str, List[str]] = {}
         self._page: Page | None = None
@@ -528,8 +691,16 @@ class PlaywrightCrawlerClient:
             pass
         search_input = self._first_matching_locator(page, SEARCH_INPUT_SELECTORS)
         if search_input is None:
+            if self.interaction_mode == "os-mouse":
+                raise RuntimeError(
+                    "os-mouse interaction mode requires a visible search input on the page"
+                )
             return None
         if not self._submit_search_query_via_input(page, search_input, query):
+            if self.interaction_mode == "os-mouse":
+                raise RuntimeError(
+                    "os-mouse interaction mode failed to submit the search query through the visible search input"
+                )
             return None
         return self._capture_search_result_htmls(page, scroll_rounds=scroll_rounds)
 
@@ -620,8 +791,14 @@ class PlaywrightCrawlerClient:
                     anchor,
                     timeout=5000,
                 ):
+                    if self.interaction_mode == "os-mouse":
+                        raise RuntimeError(
+                            "os-mouse interaction mode failed to click the target search result"
+                        )
                     return None
             except Exception:
+                if self.interaction_mode == "os-mouse":
+                    raise
                 return None
             try:
                 page.wait_for_load_state("domcontentloaded", timeout=30000)
@@ -640,6 +817,10 @@ class PlaywrightCrawlerClient:
             self.safe_mode_controller.after_page_load(page, page_kind="profile")
             self.safe_mode_controller.on_success()
             return page.content()
+        if self.interaction_mode == "os-mouse":
+            raise RuntimeError(
+                "os-mouse interaction mode could not find the target profile inside the active search results"
+            )
         return None
 
     def _return_to_active_search_page(self, page: Page) -> bool:
@@ -667,6 +848,14 @@ class PlaywrightCrawlerClient:
                 self._page_kind = "search"
                 self.safe_mode_controller.reorient_on_search_page(page)
                 return True
+            if self.interaction_mode == "os-mouse":
+                raise RuntimeError(
+                    "os-mouse interaction mode found a back button but could not click it"
+                )
+        if self.interaction_mode == "os-mouse":
+            raise RuntimeError(
+                "os-mouse interaction mode requires a visible page back button to return to search results"
+            )
         try:
             page.go_back(wait_until="domcontentloaded", timeout=30000)
         except Exception:
@@ -816,7 +1005,7 @@ class PlaywrightCrawlerClient:
             query,
             scroll_rounds=self.search_scroll_rounds,
         )
-        if htmls is None:
+        if htmls is None and self.interaction_mode != "os-mouse":
             htmls = self._load_search_result_htmls(
                 search_url,
                 scroll_rounds=self.search_scroll_rounds,

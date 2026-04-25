@@ -42,6 +42,7 @@ def test_cli_crawl_seed_exports_expected_files(tmp_path, monkeypatch):
         assert config.seed_url == "https://www.xiaohongshu.com/user/profile/user-001"
         assert config.max_depth == 2
         assert config.safe_mode is True
+        assert config.interaction_mode == "os-mouse"
         assert config.cache_dir == str(tmp_path / "cache")
         assert config.cache_ttl_days == 7
         assert config.gender_filter == "女"
@@ -91,6 +92,8 @@ def test_cli_crawl_seed_exports_expected_files(tmp_path, monkeypatch):
             "--storage-state",
             "state.json",
             "--safe-mode",
+            "--interaction-mode",
+            "os-mouse",
             "--cache-dir",
             str(tmp_path / "cache"),
             "--gender-filter",
@@ -166,7 +169,8 @@ def test_cli_open_uses_existing_storage_state(monkeypatch):
 def test_cli_crawl_seed_persists_result_to_database(tmp_path, monkeypatch):
     captured = {}
 
-    def fake_run_crawl_seed(_config):
+    def fake_run_crawl_seed(config):
+        captured["interaction_mode"] = config.interaction_mode
         return CrawlResult(
             accounts=[],
             contact_leads=[],
@@ -212,13 +216,15 @@ def test_cli_crawl_seed_persists_result_to_database(tmp_path, monkeypatch):
     assert captured["db_path"] == tmp_path / "red-crawler.db"
     assert captured["run_type"] == "crawl_seed"
     assert captured["safe_mode"] is True
+    assert captured["interaction_mode"] == "playwright"
     assert captured["seed_url"] == "https://www.xiaohongshu.com/user/profile/user-001"
 
 
 def test_cli_crawl_seed_can_disable_safe_mode(tmp_path, monkeypatch):
     captured = {}
 
-    def fake_run_crawl_seed(_config):
+    def fake_run_crawl_seed(config):
+        captured["interaction_mode"] = config.interaction_mode
         return CrawlResult(
             accounts=[],
             contact_leads=[],
@@ -254,6 +260,8 @@ def test_cli_crawl_seed_can_disable_safe_mode(tmp_path, monkeypatch):
             "--storage-state",
             "state.json",
             "--no-safe-mode",
+            "--interaction-mode",
+            "os-mouse",
             "--db-path",
             str(tmp_path / "red-crawler.db"),
             "--output-dir",
@@ -263,6 +271,7 @@ def test_cli_crawl_seed_can_disable_safe_mode(tmp_path, monkeypatch):
 
     assert exit_code == 0
     assert captured["safe_mode"] is False
+    assert captured["interaction_mode"] == "os-mouse"
     assert captured["seed_url"] == "https://www.xiaohongshu.com/user/profile/user-001"
 
 
@@ -277,6 +286,7 @@ def test_cli_crawl_search_exports_and_persists_result(tmp_path, monkeypatch):
         captured["min_relevance_score"] = config.min_relevance_score
         captured["creator_only"] = config.creator_only
         captured["safe_mode"] = config.safe_mode
+        captured["interaction_mode"] = config.interaction_mode
         return CrawlResult(
             accounts=[
                 AccountRecord(
@@ -343,6 +353,8 @@ def test_cli_crawl_search_exports_and_persists_result(tmp_path, monkeypatch):
             "--min-relevance-score",
             "0.7",
             "--creator-only",
+            "--interaction-mode",
+            "os-mouse",
             "--db-path",
             str(tmp_path / "red-crawler.db"),
             "--output-dir",
@@ -358,6 +370,7 @@ def test_cli_crawl_search_exports_and_persists_result(tmp_path, monkeypatch):
     assert captured["min_relevance_score"] == 0.7
     assert captured["creator_only"] is True
     assert captured["safe_mode"] is True
+    assert captured["interaction_mode"] == "os-mouse"
     assert captured["db_path"] == tmp_path / "red-crawler.db"
     assert captured["run_type"] == "crawl_search"
     assert captured["persist_safe_mode"] is True
@@ -379,6 +392,7 @@ def test_cli_collect_nightly_runs_worker(tmp_path, monkeypatch):
         captured["daily_search_term_budget"] = config.daily_search_term_budget
         captured["startup_jitter_minutes"] = config.startup_jitter_minutes
         captured["slot_name"] = config.slot_name
+        captured["interaction_mode"] = config.interaction_mode
         return object()
 
     monkeypatch.setattr("red_crawler.cli.run_nightly_collection", fake_run_nightly_collection)
@@ -402,6 +416,8 @@ def test_cli_collect_nightly_runs_worker(tmp_path, monkeypatch):
             "25",
             "--slot-name",
             "morning",
+            "--interaction-mode",
+            "os-mouse",
         ]
     )
 
@@ -415,6 +431,7 @@ def test_cli_collect_nightly_runs_worker(tmp_path, monkeypatch):
         "daily_search_term_budget": 3,
         "startup_jitter_minutes": 25,
         "slot_name": "morning",
+        "interaction_mode": "os-mouse",
     }
 
 
@@ -427,6 +444,7 @@ def test_cli_crawl_discover_runs_worker_without_seed_url(tmp_path, monkeypatch):
         captured["report_dir"] = config.report_dir
         captured["crawl_budget"] = config.crawl_budget
         captured["search_term_limit"] = config.search_term_limit
+        captured["interaction_mode"] = config.interaction_mode
         return object()
 
     monkeypatch.setattr("red_crawler.cli.run_nightly_collection", fake_run_nightly_collection)
@@ -444,6 +462,8 @@ def test_cli_crawl_discover_runs_worker_without_seed_url(tmp_path, monkeypatch):
             "6",
             "--search-term-limit",
             "1",
+            "--interaction-mode",
+            "os-mouse",
         ]
     )
 
@@ -454,6 +474,7 @@ def test_cli_crawl_discover_runs_worker_without_seed_url(tmp_path, monkeypatch):
         "report_dir": str(tmp_path / "reports"),
         "crawl_budget": 6,
         "search_term_limit": 1,
+        "interaction_mode": "os-mouse",
     }
 
 

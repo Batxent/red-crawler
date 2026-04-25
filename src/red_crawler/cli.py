@@ -17,6 +17,7 @@ from red_crawler.nightly import (
 )
 from red_crawler.runner import CrawlConfig, SearchCrawlConfig, run_crawl_search, run_crawl_seed
 from red_crawler.session import (
+    SUPPORTED_INTERACTION_MODES,
     open_xiaohongshu,
     save_login_storage_state,
     start_qr_login_storage_state,
@@ -45,6 +46,11 @@ def _add_discovery_collect_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--daily-search-term-budget", type=int, default=2)
     parser.add_argument("--startup-jitter-minutes", type=int, default=0)
     parser.add_argument("--slot-name", default="")
+    parser.add_argument(
+        "--interaction-mode",
+        choices=SUPPORTED_INTERACTION_MODES,
+        default="playwright",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -64,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
     crawl_seed.add_argument("--cache-dir")
     crawl_seed.add_argument("--cache-ttl-days", type=int, default=7)
     crawl_seed.add_argument("--gender-filter")
+    crawl_seed.add_argument(
+        "--interaction-mode",
+        choices=SUPPORTED_INTERACTION_MODES,
+        default="playwright",
+    )
     crawl_seed.add_argument("--db-path", default="data/red_crawler.db")
     crawl_seed.add_argument("--output-dir", default="output")
 
@@ -81,6 +92,11 @@ def build_parser() -> argparse.ArgumentParser:
     crawl_search.add_argument("--cache-dir")
     crawl_search.add_argument("--cache-ttl-days", type=int, default=7)
     crawl_search.add_argument("--gender-filter")
+    crawl_search.add_argument(
+        "--interaction-mode",
+        choices=SUPPORTED_INTERACTION_MODES,
+        default="playwright",
+    )
     crawl_search.add_argument("--db-path", default="data/red_crawler.db")
     crawl_search.add_argument("--output-dir", default="output")
 
@@ -223,6 +239,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             daily_search_term_budget=args.daily_search_term_budget,
             startup_jitter_minutes=args.startup_jitter_minutes,
             slot_name=args.slot_name,
+            interaction_mode=args.interaction_mode,
         )
         run_nightly_collection(config)
         return 0
@@ -291,6 +308,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             min_relevance_score=args.min_relevance_score,
             creator_only=args.creator_only,
             safe_mode=args.safe_mode,
+            interaction_mode=args.interaction_mode,
             cache_dir=args.cache_dir,
             cache_ttl_days=args.cache_ttl_days,
             gender_filter=args.gender_filter,
@@ -318,6 +336,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_depth=args.max_depth,
         include_note_recommendations=args.include_note_recommendations,
         safe_mode=args.safe_mode,
+        interaction_mode=args.interaction_mode,
         cache_dir=args.cache_dir,
         cache_ttl_days=args.cache_ttl_days,
         gender_filter=args.gender_filter,
