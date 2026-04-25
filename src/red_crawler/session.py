@@ -65,6 +65,24 @@ BACK_BUTTON_SELECTORS = (
     ".left-area .back",
 )
 SEARCH_RESULT_CARD_SELECTOR = ".card-bottom-wrapper a.author[href*='/user/profile/']"
+DEFAULT_COSMETICS_HOMEFEED_URL = (
+    "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3"
+)
+LOGIN_DIALOG_CLOSE_SELECTORS = (
+    "button[aria-label='关闭']",
+    "[aria-label='关闭']",
+    "button[title='关闭']",
+    "[title='关闭']",
+    ".login-container .close",
+    ".login-modal .close",
+    ".login-dialog .close",
+    ".login .close",
+    ".modal .close",
+    ".reds-modal .close",
+    ".close-circle",
+    ".icon-close",
+    "button:has-text('关闭')",
+)
 SUPPORTED_INTERACTION_MODES = ("playwright", "os-mouse")
 SUPPORTED_BROWSER_MODES = ("local", "bright-data")
 BRIGHT_DATA_BROWSER_API_ENDPOINT_ENVS = (
@@ -576,13 +594,13 @@ class SafeModeController:
 class BrowserSession:
     def __init__(
         self,
-        storage_state: str,
+        storage_state: str | None = None,
         headless: bool = False,
         browser_mode: str = "local",
         browser_endpoint: str | None = None,
         browser_auth: str | None = None,
     ):
-        self.storage_state = str(storage_state)
+        self.storage_state = str(storage_state) if storage_state else ""
         self.headless = headless
         self.browser_mode = browser_mode
         self.browser_endpoint = browser_endpoint
@@ -592,8 +610,8 @@ class BrowserSession:
         self._context: BrowserContext | None = None
 
     def __enter__(self) -> "BrowserSession":
-        storage_state_path = Path(self.storage_state)
-        if not storage_state_path.exists():
+        storage_state_path = Path(self.storage_state) if self.storage_state else None
+        if storage_state_path is not None and not storage_state_path.exists():
             raise FileNotFoundError(
                 f"storage state file not found: {storage_state_path.as_posix()}"
             )
@@ -611,12 +629,15 @@ class BrowserSession:
             self._context = self._new_remote_context(storage_state_path)
         else:
             self._browser = self._playwright.chromium.launch(headless=self.headless)
-            fp = _get_or_create_fingerprint(storage_state_path)
-            self._context = NewContext(
-                self._browser,
-                fingerprint=fp,
-                storage_state=self.storage_state,
+            fp = (
+                _get_or_create_fingerprint(storage_state_path)
+                if storage_state_path is not None
+                else FingerprintGenerator(os=("windows",)).generate()
             )
+            context_kwargs = {"fingerprint": fp}
+            if storage_state_path is not None:
+                context_kwargs["storage_state"] = str(storage_state_path)
+            self._context = NewContext(self._browser, **context_kwargs)
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -631,16 +652,19 @@ class BrowserSession:
             self._playwright.stop()
             self._playwright = None
 
-    def _new_remote_context(self, storage_state_path: Path) -> BrowserContext:
+    def _new_remote_context(self, storage_state_path: Path | None) -> BrowserContext:
         if self._browser is None:
             raise RuntimeError("browser session is not started")
         try:
+            if storage_state_path is None:
+                return self._browser.new_context()
             return self._browser.new_context(storage_state=str(storage_state_path))
         except Exception:
             if not self._browser.contexts:
                 raise
             context = self._browser.contexts[0]
-            self._apply_storage_state_to_context(context, storage_state_path)
+            if storage_state_path is not None:
+                self._apply_storage_state_to_context(context, storage_state_path)
             return context
 
     def _apply_storage_state_to_context(
@@ -756,8 +780,9 @@ class PlaywrightCrawlerClient:
             page.wait_for_load_state("networkidle", timeout=5000)
         except Exception:
             pass
+        self._dismiss_login_dialogs(page)
         body_text = page.locator("body").inner_text()
-        risk_type = classify_high_risk_page(body_text)
+        risk_type = self._classify_page_after_dialog_dismissal(page, body_text)
         if risk_type is not None:
             self.safe_mode_controller.on_risk_event(reason=risk_type)
             raise RuntimeError(f"high risk page detected: {risk_type}")
@@ -804,6 +829,7 @@ class PlaywrightCrawlerClient:
             page.wait_for_load_state("networkidle", timeout=5000)
         except Exception:
             pass
+        self._dismiss_login_dialogs(page)
         search_input = self._first_matching_locator(page, SEARCH_INPUT_SELECTORS)
         if search_input is None:
             if self.interaction_mode == "os-mouse":
@@ -835,8 +861,9 @@ class PlaywrightCrawlerClient:
                 page.wait_for_load_state("networkidle", timeout=5000)
             except Exception:
                 pass
+            self._dismiss_login_dialogs(page)
             body_text = page.locator("body").inner_text()
-            risk_type = classify_high_risk_page(body_text)
+            risk_type = self._classify_page_after_dialog_dismissal(page, body_text)
             if risk_type is not None:
                 self.safe_mode_controller.on_risk_event(reason=risk_type)
                 raise RuntimeError(f"high risk page detected: {risk_type}")
@@ -923,8 +950,9 @@ class PlaywrightCrawlerClient:
                 page.wait_for_load_state("networkidle", timeout=5000)
             except Exception:
                 pass
+            self._dismiss_login_dialogs(page)
             body_text = page.locator("body").inner_text()
-            risk_type = classify_high_risk_page(body_text)
+            risk_type = self._classify_page_after_dialog_dismissal(page, body_text)
             if risk_type is not None:
                 self.safe_mode_controller.on_risk_event(reason=risk_type)
                 raise RuntimeError(f"high risk page detected: {risk_type}")
@@ -981,7 +1009,56 @@ class PlaywrightCrawlerClient:
             pass
         self._page_kind = "search"
         self.safe_mode_controller.reorient_on_search_page(page)
+        self._dismiss_login_dialogs(page)
         return True
+
+    def _classify_page_after_dialog_dismissal(
+        self,
+        page: Page,
+        body_text: str,
+    ) -> str | None:
+        risk_type = classify_high_risk_page(body_text)
+        if risk_type != "login_required":
+            return risk_type
+        if not self._dismiss_login_dialogs(page):
+            return risk_type
+        try:
+            page.wait_for_timeout(500)
+        except Exception:
+            pass
+        refreshed_text = page.locator("body").inner_text()
+        refreshed_risk_type = classify_high_risk_page(refreshed_text)
+        return None if refreshed_risk_type == "login_required" else refreshed_risk_type
+
+    def _dismiss_login_dialogs(self, page: Page) -> bool:
+        dismissed = False
+        for selector in LOGIN_DIALOG_CLOSE_SELECTORS:
+            try:
+                locator = page.locator(selector)
+            except Exception:
+                continue
+            try:
+                count = locator.count()
+            except Exception:
+                count = 1
+            for index in range(min(count, 3)):
+                try:
+                    target = locator.nth(index) if hasattr(locator, "nth") else locator
+                    is_visible = getattr(target, "is_visible", None)
+                    if callable(is_visible) and not is_visible(timeout=500):
+                        continue
+                    click = getattr(target, "click", None)
+                    if not callable(click):
+                        continue
+                    click(timeout=1000)
+                    dismissed = True
+                    try:
+                        page.wait_for_timeout(300)
+                    except Exception:
+                        pass
+                except Exception:
+                    continue
+        return dismissed
 
     def _first_matching_locator(
         self,
@@ -1133,6 +1210,35 @@ class PlaywrightCrawlerClient:
                 encoding="utf-8",
             )
             self.safe_mode_controller.log_fn("safe-mode: wrote search cache to disk")
+        return list(htmls)
+
+    def fetch_homefeed_result_htmls(
+        self,
+        source_url: str = DEFAULT_COSMETICS_HOMEFEED_URL,
+    ) -> List[str]:
+        cache_key = f"homefeed:{source_url}"
+        cached = self._search_html_cache.get(cache_key)
+        if cached is not None:
+            return list(cached)
+        cache_path = self._cache_path("search", cache_key)
+        if cache_path is not None and cache_path.exists():
+            if self._is_cache_fresh(cache_path):
+                htmls = json.loads(cache_path.read_text(encoding="utf-8"))
+                self._search_html_cache[cache_key] = list(htmls)
+                return list(htmls)
+            self.safe_mode_controller.log_fn("safe-mode: disk cache expired for homefeed")
+        htmls = self._load_search_result_htmls(
+            source_url,
+            scroll_rounds=self.search_scroll_rounds,
+        )
+        self._remember_active_search_results(cache_key, htmls)
+        self._search_html_cache[cache_key] = list(htmls)
+        if cache_path is not None:
+            cache_path.write_text(
+                json.dumps(htmls, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            self.safe_mode_controller.log_fn("safe-mode: wrote homefeed cache to disk")
         return list(htmls)
 
 

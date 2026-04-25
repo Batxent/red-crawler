@@ -17,8 +17,8 @@ config:
     description: Working directory for state, database, reports, and outputs.
   storage_state:
     type: string
-    default: ./state.json
-    description: Playwright storage state file used for authenticated actions.
+    default: ""
+    description: Optional Playwright storage state file used for authenticated actions.
   db_path:
     type: string
     default: ./data/red_crawler.db
@@ -66,6 +66,7 @@ input_schema:
         - bootstrap
         - login
         - crawl_seed
+        - crawl_homefeed
         - collect_nightly
         - report_weekly
         - list_contactable
@@ -83,6 +84,8 @@ input_schema:
       type: string
     seed_url:
       type: string
+    homefeed_url:
+      type: string
     login_url:
       type: string
     sync_dependencies:
@@ -96,6 +99,12 @@ input_schema:
     report_dir:
       type: string
     cache_dir:
+      type: string
+    browser_mode:
+      type: string
+    browser_endpoint:
+      type: string
+    browser_auth:
       type: string
     max_accounts:
       type: integer

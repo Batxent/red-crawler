@@ -15,8 +15,16 @@ from red_crawler.nightly import (
     run_nightly_collection,
     write_weekly_reports,
 )
-from red_crawler.runner import CrawlConfig, SearchCrawlConfig, run_crawl_search, run_crawl_seed
+from red_crawler.runner import (
+    CrawlConfig,
+    HomefeedCrawlConfig,
+    SearchCrawlConfig,
+    run_crawl_homefeed,
+    run_crawl_search,
+    run_crawl_seed,
+)
 from red_crawler.session import (
+    DEFAULT_COSMETICS_HOMEFEED_URL,
     SUPPORTED_BROWSER_MODES,
     SUPPORTED_INTERACTION_MODES,
     open_xiaohongshu,
@@ -53,7 +61,7 @@ def _add_browser_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_discovery_collect_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--storage-state", required=True)
+    parser.add_argument("--storage-state", default="")
     parser.add_argument("--db-path", default="data/red_crawler.db")
     parser.add_argument("--report-dir", default="reports")
     parser.add_argument("--cache-dir", default=".cache/red-crawler")
@@ -64,6 +72,7 @@ def _add_discovery_collect_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--daily-search-term-budget", type=int, default=2)
     parser.add_argument("--startup-jitter-minutes", type=int, default=0)
     parser.add_argument("--slot-name", default="")
+    parser.add_argument("--homefeed-url", default=DEFAULT_COSMETICS_HOMEFEED_URL)
     parser.add_argument(
         "--interaction-mode",
         choices=SUPPORTED_INTERACTION_MODES,
@@ -79,7 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     crawl_seed = subparsers.add_parser("crawl-seed")
     crawl_seed.add_argument("--seed-url", required=True)
-    crawl_seed.add_argument("--storage-state", required=True)
+    crawl_seed.add_argument("--storage-state", default="")
     crawl_seed.add_argument("--max-accounts", type=int, default=20)
     crawl_seed.add_argument("--max-depth", type=int, default=2)
     crawl_seed.add_argument("--include-note-recommendations", action="store_true")
@@ -100,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     crawl_search = subparsers.add_parser("crawl-search")
     crawl_search.add_argument("--search-term", required=True)
-    crawl_search.add_argument("--storage-state", required=True)
+    crawl_search.add_argument("--storage-state", default="")
     crawl_search.add_argument("--max-accounts", type=int, default=20)
     crawl_search.add_argument("--search-scroll-rounds", type=int, default=2)
     crawl_search.add_argument("--min-followers", type=int, default=0)
@@ -120,6 +129,29 @@ def build_parser() -> argparse.ArgumentParser:
     _add_browser_args(crawl_search)
     crawl_search.add_argument("--db-path", default="data/red_crawler.db")
     crawl_search.add_argument("--output-dir", default="output")
+
+    crawl_homefeed = subparsers.add_parser("crawl-homefeed")
+    crawl_homefeed.add_argument("--homefeed-url", default=DEFAULT_COSMETICS_HOMEFEED_URL)
+    crawl_homefeed.add_argument("--storage-state", default="")
+    crawl_homefeed.add_argument("--max-accounts", type=int, default=20)
+    crawl_homefeed.add_argument("--search-scroll-rounds", type=int, default=2)
+    crawl_homefeed.add_argument("--min-followers", type=int, default=0)
+    crawl_homefeed.add_argument("--min-relevance-score", type=float, default=0.0)
+    crawl_homefeed.add_argument("--creator-only", action="store_true")
+    crawl_homefeed.set_defaults(safe_mode=True)
+    crawl_homefeed.add_argument("--safe-mode", dest="safe_mode", action="store_true")
+    crawl_homefeed.add_argument("--no-safe-mode", dest="safe_mode", action="store_false")
+    crawl_homefeed.add_argument("--cache-dir")
+    crawl_homefeed.add_argument("--cache-ttl-days", type=int, default=7)
+    crawl_homefeed.add_argument("--gender-filter")
+    crawl_homefeed.add_argument(
+        "--interaction-mode",
+        choices=SUPPORTED_INTERACTION_MODES,
+        default="playwright",
+    )
+    _add_browser_args(crawl_homefeed)
+    crawl_homefeed.add_argument("--db-path", default="data/red_crawler.db")
+    crawl_homefeed.add_argument("--output-dir", default="output")
 
     login = subparsers.add_parser("login")
     login.add_argument("--save-state", required=True)
@@ -260,6 +292,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             daily_search_term_budget=args.daily_search_term_budget,
             startup_jitter_minutes=args.startup_jitter_minutes,
             slot_name=args.slot_name,
+            homefeed_url=args.homefeed_url,
             interaction_mode=args.interaction_mode,
             browser_mode=args.browser_mode,
             browser_endpoint=args.browser_endpoint,
@@ -318,6 +351,37 @@ def main(argv: Sequence[str] | None = None) -> int:
                         ]
                     )
                 )
+        return 0
+
+    if args.command == "crawl-homefeed":
+        output_dir = Path(args.output_dir)
+        config = HomefeedCrawlConfig(
+            homefeed_url=args.homefeed_url,
+            storage_state=args.storage_state,
+            output_dir=str(output_dir),
+            max_accounts=args.max_accounts,
+            search_scroll_rounds=args.search_scroll_rounds,
+            min_followers=args.min_followers,
+            min_relevance_score=args.min_relevance_score,
+            creator_only=args.creator_only,
+            safe_mode=args.safe_mode,
+            interaction_mode=args.interaction_mode,
+            browser_mode=args.browser_mode,
+            browser_endpoint=args.browser_endpoint,
+            browser_auth=args.browser_auth,
+            cache_dir=args.cache_dir,
+            cache_ttl_days=args.cache_ttl_days,
+            gender_filter=args.gender_filter,
+        )
+        result = run_crawl_homefeed(config)
+        export_run(result, output_dir)
+        store = CrawlerStore(Path(args.db_path))
+        store.record_crawl_result(
+            result,
+            run_type="crawl_homefeed",
+            safe_mode=args.safe_mode,
+            started_at=datetime.now(timezone.utc),
+        )
         return 0
 
     if args.command == "crawl-search":

@@ -29,6 +29,12 @@ class FakeNightlyClient:
             return [payload]
         return payload
 
+    def fetch_homefeed_result_htmls(self, source_url):
+        payload = self.search_pages.get(f"homefeed:{source_url}", [])
+        if isinstance(payload, str):
+            return [payload]
+        return payload
+
     def fetch_profile_html(self, profile_url):
         if profile_url == self.risky_profile_url:
             raise RiskControlTriggered("risk control threshold reached")

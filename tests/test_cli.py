@@ -436,6 +436,61 @@ def test_cli_crawl_search_passes_bright_data_browser_config(tmp_path, monkeypatc
     }
 
 
+def test_cli_crawl_homefeed_does_not_require_storage_state(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_run_crawl_homefeed(config):
+        captured["homefeed_url"] = config.homefeed_url
+        captured["storage_state"] = config.storage_state
+        captured["max_accounts"] = config.max_accounts
+        return CrawlResult(
+            accounts=[],
+            contact_leads=[],
+            run_report=RunReport(
+                seed_url=f"homefeed:{config.homefeed_url}",
+                attempted_accounts=0,
+                succeeded_accounts=0,
+                failed_accounts=0,
+                lead_counts={},
+                errors=[],
+            ),
+        )
+
+    class FakeStore:
+        def __init__(self, db_path):
+            captured["db_path"] = db_path
+
+        def record_crawl_result(self, result, run_type, safe_mode, started_at):
+            captured["run_type"] = run_type
+            captured["safe_mode"] = safe_mode
+            return 1
+
+    monkeypatch.setattr("red_crawler.cli.run_crawl_homefeed", fake_run_crawl_homefeed)
+    monkeypatch.setattr("red_crawler.cli.CrawlerStore", FakeStore)
+
+    exit_code = main(
+        [
+            "crawl-homefeed",
+            "--max-accounts",
+            "8",
+            "--db-path",
+            str(tmp_path / "red-crawler.db"),
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["homefeed_url"] == (
+        "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3"
+    )
+    assert captured["storage_state"] == ""
+    assert captured["max_accounts"] == 8
+    assert captured["db_path"] == tmp_path / "red-crawler.db"
+    assert captured["run_type"] == "crawl_homefeed"
+    assert captured["safe_mode"] is True
+
+
 def test_cli_collect_nightly_runs_worker(tmp_path, monkeypatch):
     captured = {}
 
@@ -448,6 +503,7 @@ def test_cli_collect_nightly_runs_worker(tmp_path, monkeypatch):
         captured["daily_search_term_budget"] = config.daily_search_term_budget
         captured["startup_jitter_minutes"] = config.startup_jitter_minutes
         captured["slot_name"] = config.slot_name
+        captured["homefeed_url"] = config.homefeed_url
         captured["interaction_mode"] = config.interaction_mode
         return object()
 
@@ -487,6 +543,7 @@ def test_cli_collect_nightly_runs_worker(tmp_path, monkeypatch):
         "daily_search_term_budget": 3,
         "startup_jitter_minutes": 25,
         "slot_name": "morning",
+        "homefeed_url": "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3",
         "interaction_mode": "os-mouse",
     }
 
@@ -500,6 +557,7 @@ def test_cli_crawl_discover_runs_worker_without_seed_url(tmp_path, monkeypatch):
         captured["report_dir"] = config.report_dir
         captured["crawl_budget"] = config.crawl_budget
         captured["search_term_limit"] = config.search_term_limit
+        captured["homefeed_url"] = config.homefeed_url
         captured["interaction_mode"] = config.interaction_mode
         return object()
 
@@ -530,6 +588,7 @@ def test_cli_crawl_discover_runs_worker_without_seed_url(tmp_path, monkeypatch):
         "report_dir": str(tmp_path / "reports"),
         "crawl_budget": 6,
         "search_term_limit": 1,
+        "homefeed_url": "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3",
         "interaction_mode": "os-mouse",
     }
 

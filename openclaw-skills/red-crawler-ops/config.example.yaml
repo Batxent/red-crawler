@@ -1,10 +1,11 @@
 workspace_path: .
 require_local_checkout: false
-storage_state: ./state.json
+storage_state:
 db_path: ./data/red_crawler.db
 report_dir: ./reports
 output_dir: ./output
 cache_dir: ./.cache/red-crawler
+homefeed_url: https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3
 browser_mode: local
 browser_endpoint:
 browser_auth:

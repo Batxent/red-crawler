@@ -22,6 +22,7 @@ from red_crawler.extract.contacts import extract_contact_leads
 from red_crawler.models import AccountRecord, ContactLead
 from red_crawler.session import (
     BrowserSession,
+    DEFAULT_COSMETICS_HOMEFEED_URL,
     PlaywrightCrawlerClient,
     RiskControlTriggered,
     SafeModeController,
@@ -39,6 +40,8 @@ class NightlyClient(Protocol):
     def fetch_profile_html(self, profile_url: str) -> str: ...
 
     def fetch_search_result_htmls(self, query: str) -> list[str]: ...
+
+    def fetch_homefeed_result_htmls(self, source_url: str) -> list[str]: ...
 
     def fetch_note_recommendation_html(self, profile_url: str) -> list[str]: ...
 
@@ -87,10 +90,10 @@ def should_promote_seed(
 
 @dataclass
 class NightlyCollectConfig:
-    storage_state: str
     db_path: str
     report_dir: str
     cache_dir: str
+    storage_state: str = ""
     crawl_budget: int = 12
     search_term_limit: int = 2
     daily_account_budget: int = 12
@@ -106,6 +109,7 @@ class NightlyCollectConfig:
     promotion_threshold: float = 0.75
     startup_jitter_minutes: int = 0
     slot_name: str = ""
+    homefeed_url: str = DEFAULT_COSMETICS_HOMEFEED_URL
 
 
 @dataclass
@@ -255,6 +259,32 @@ def collect_nightly_with_client(
         term: {"candidate_count": 0, "new_contactable_count": 0}
         for term in processed_search_terms
     }
+
+    if not processed_search_terms and effective_crawl_budget > 0:
+        homefeed_term = f"homefeed:{config.homefeed_url}"
+        try:
+            html_snapshots = client.fetch_homefeed_result_htmls(config.homefeed_url)
+        except RiskControlTriggered as exc:
+            aborted = True
+            abort_reason = str(exc)
+            errors.append({"source": config.homefeed_url, "error": str(exc)})
+        else:
+            candidates = []
+            for html in html_snapshots:
+                candidates.extend(extract_search_result_profiles(html=html, max_results=100))
+            for index, candidate in enumerate(candidates):
+                candidate["priority"] = round(max(0.2, 1.0 - index * 0.05), 2)
+            term_metrics[homefeed_term] = {
+                "candidate_count": len(candidates),
+                "new_contactable_count": 0,
+            }
+            queued_candidates += store.enqueue_discovery_candidates(
+                candidates,
+                source_type="homefeed",
+                source_seed_account_id="",
+                search_term=homefeed_term,
+                now=started_at,
+            )
 
     for term in processed_search_terms:
         try:

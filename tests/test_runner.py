@@ -1,6 +1,8 @@
 from red_crawler.runner import (
     CrawlConfig,
+    HomefeedCrawlConfig,
     SearchCrawlConfig,
+    run_crawl_homefeed_with_client,
     run_crawl_search_with_client,
     run_crawl_seed_with_client,
 )
@@ -26,6 +28,12 @@ class FakeClient:
     def fetch_search_result_htmls(self, query):
         self.search_queries.append(query)
         payload = self.search_pages.get(query, [])
+        if isinstance(payload, str):
+            return [payload]
+        return payload
+
+    def fetch_homefeed_result_htmls(self, source_url):
+        payload = self.search_pages.get(f"homefeed:{source_url}", [])
         if isinstance(payload, str):
             return [payload]
         return payload
@@ -90,6 +98,86 @@ def test_run_crawl_seed_collects_accounts_leads_and_failures():
             "error": "profile page unavailable",
         }
     ]
+
+
+def test_run_crawl_homefeed_collects_profiles_from_author_links():
+    homefeed_url = "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3"
+    pages = {
+        "https://www.xiaohongshu.com/user/profile/user-201?xsec_source=pc_feed": """
+        <section class="profile">
+          <div class="user-id">账号ID: user-201</div>
+          <h1 class="user-name">A</h1>
+          <div class="user-bio">彩妆博主 邮箱：a@example.com</div>
+        </section>
+        """,
+    }
+    homefeed_html = """
+    <div class="note-item">
+      <a class="cover" href="/explore/note-001">不要点帖子</a>
+      <div class="card-bottom-wrapper">
+        <a class="author" href="/user/profile/user-201?xsec_source=pc_feed">A</a>
+      </div>
+    </div>
+    """
+    client = FakeClient(
+        pages=pages,
+        search_pages={f"homefeed:{homefeed_url}": homefeed_html},
+    )
+    config = HomefeedCrawlConfig(
+        output_dir="out",
+        homefeed_url=homefeed_url,
+        max_accounts=5,
+    )
+
+    result = run_crawl_homefeed_with_client(config, client)
+
+    assert [account.account_id for account in result.accounts] == ["user-201"]
+    assert result.accounts[0].source_type == "homefeed"
+    assert result.contact_leads[0].normalized_value == "a@example.com"
+    assert result.run_report.seed_url == f"homefeed:{homefeed_url}"
+
+
+def test_run_crawl_homefeed_collects_profiles_from_feed_state():
+    homefeed_url = "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3"
+    profile_url = (
+        "https://www.xiaohongshu.com/user/profile/user-301"
+        "?xsec_token=token-301&xsec_source=pc_feed"
+    )
+    pages = {
+        profile_url: """
+        <section class="profile">
+          <div class="user-id">账号ID: user-301</div>
+          <h1 class="user-name">B</h1>
+          <div class="user-bio">美妆博主 邮箱：b@example.com</div>
+        </section>
+        """,
+    }
+    homefeed_html = """
+    <script>
+      window.__INITIAL_STATE__ = {
+        "feeds":[{"noteCard":{"user":{
+          "nickname":"B",
+          "nickName":"B",
+          "userId":"user-301",
+          "xsecToken":"token-301"
+        }}}]
+      }
+    </script>
+    """
+    client = FakeClient(
+        pages=pages,
+        search_pages={f"homefeed:{homefeed_url}": homefeed_html},
+    )
+    config = HomefeedCrawlConfig(
+        output_dir="out",
+        homefeed_url=homefeed_url,
+        max_accounts=5,
+    )
+
+    result = run_crawl_homefeed_with_client(config, client)
+
+    assert [account.account_id for account in result.accounts] == ["user-301"]
+    assert result.contact_leads[0].normalized_value == "b@example.com"
 
 
 def test_run_crawl_seed_filters_successful_accounts_by_gender():

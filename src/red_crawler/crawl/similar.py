@@ -105,7 +105,60 @@ def extract_search_result_profiles(
         if len(results) >= max_results:
             break
 
+    if len(results) < max_results:
+        for candidate in _extract_feed_state_profiles(html, base_url=base_url):
+            account_id = candidate["account_id"]
+            if account_id in seen:
+                continue
+            seen.add(account_id)
+            results.append(candidate)
+            if len(results) >= max_results:
+                break
+
     return results
+
+
+def _extract_feed_state_profiles(
+    html: str,
+    *,
+    base_url: str = DEFAULT_BASE_URL,
+) -> List[Dict[str, str]]:
+    results: List[Dict[str, str]] = []
+    seen = set()
+    pattern = re.compile(
+        r'"user"\s*:\s*\{(?P<payload>[^{}]*?"userId"\s*:\s*"(?P<user_id>[^"]+)"[^{}]*?)\}'
+    )
+    for match in pattern.finditer(html):
+        payload = match.group("payload")
+        account_id = match.group("user_id").strip()
+        if not account_id or account_id in seen:
+            continue
+        nickname = _extract_json_string_field(payload, "nickname") or _extract_json_string_field(
+            payload,
+            "nickName",
+        )
+        if not nickname:
+            continue
+        xsec_token = _extract_json_string_field(payload, "xsecToken")
+        profile_url = urljoin(f"{base_url.rstrip('/')}/", f"/user/profile/{account_id}")
+        if xsec_token:
+            profile_url = f"{profile_url}?xsec_token={xsec_token}&xsec_source=pc_feed"
+        seen.add(account_id)
+        results.append(
+            {
+                "account_id": account_id,
+                "profile_url": profile_url,
+                "nickname": nickname,
+            }
+        )
+    return results
+
+
+def _extract_json_string_field(payload: str, field_name: str) -> str:
+    match = re.search(rf'"{re.escape(field_name)}"\s*:\s*"([^"]*)"', payload)
+    if not match:
+        return ""
+    return match.group(1).encode("utf-8").decode("unicode_escape")
 
 
 def build_search_queries(seed_account: Dict[str, object]) -> List[str]:

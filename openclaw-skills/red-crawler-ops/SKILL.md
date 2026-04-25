@@ -31,7 +31,6 @@ Crawl a specific Xiaohongshu user profile and extract contact information.
 ```bash
 red-crawler crawl-seed \
   --seed-url "https://www.xiaohongshu.com/user/profile/USER_ID" \
-  --storage-state "./state.json" \
   --max-accounts 5 \
   --max-depth 2 \
   --db-path "./data/red_crawler.db" \
@@ -41,7 +40,7 @@ red-crawler crawl-seed \
 **Parameters:**
 
 - `--seed-url` (required): Target user profile URL
-- `--storage-state` (required): Path to Playwright storage state file
+- `--storage-state`: Optional Playwright storage state file
 - `--max-accounts`: Maximum accounts to crawl (default: 20)
 - `--max-depth`: Crawl depth for related accounts (default: 2)
 - `--include-note-recommendations`: Include note recommendations
@@ -57,9 +56,21 @@ red-crawler crawl-seed \
 - `contact_leads.csv`: Extracted contact information (emails, etc.)
 - `run_report.json`: Execution report
 
-### 2. login
+### 2. crawl-homefeed
 
-Interactive login to save browser session.
+Collect users from the Xiaohongshu cosmetics homefeed. This clicks card author links, not note links.
+
+```bash
+red-crawler crawl-homefeed \
+  --homefeed-url "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3" \
+  --max-accounts 20 \
+  --db-path "./data/red_crawler.db" \
+  --output-dir "./output"
+```
+
+### 3. login
+
+Optional interactive login to save browser session.
 
 ```bash
 red-crawler login --save-state "./state.json"
@@ -70,7 +81,7 @@ red-crawler login --save-state "./state.json"
 - `--save-state` (required): Path to save storage state
 - `--login-url`: Login page URL (default: https://www.xiaohongshu.com)
 
-### 3. login-qr-start / login-qr-finish
+### 4. login-qr-start / login-qr-finish
 
 QR code-based login for headless environments.
 
@@ -88,13 +99,12 @@ red-crawler login-qr-finish \
   --session-path "./login-session.json"
 ```
 
-### 4. collect-nightly
+### 5. collect-nightly
 
 Run scheduled nightly data collection.
 
 ```bash
 red-crawler collect-nightly \
-  --storage-state "./state.json" \
   --db-path "./data/red_crawler.db" \
   --report-dir "./reports" \
   --crawl-budget 30 \
@@ -103,7 +113,7 @@ red-crawler collect-nightly \
 
 **Parameters:**
 
-- `--storage-state` (required): Path to storage state file
+- `--storage-state`: Optional storage state file
 - `--db-path`: Database path (default: ./data/red_crawler.db)
 - `--report-dir`: Report directory (default: ./reports)
 - `--cache-dir`: Cache directory
@@ -171,6 +181,7 @@ red-crawler open --storage-state "./state.json"
 - `bootstrap`
 - `login`
 - `crawl_seed`
+- `crawl_homefeed`
 - `collect_nightly`
 - `report_weekly`
 - `list_contactable`
@@ -251,8 +262,8 @@ On Windows, red-crawler runs inside WSL2. You need:
 - Set `require_local_checkout: true` only when you intentionally want to run from a source checkout.
 - `uv` is only required when `sync_dependencies: true` is used for a local source checkout.
 - `bootstrap` does not create a login session. Use `login` explicitly.
-- `login` creates the Playwright storage state explicitly.
-- `crawl_seed` and `collect_nightly` require an authenticated Playwright storage state file.
+- `login` creates an optional Playwright storage state explicitly.
+- `crawl_seed`, `crawl_homefeed`, and `collect_nightly` can run without a storage state file.
 - `report_weekly` and `list_contactable` run from the database and do not require storage state.
 - The workspace must contain `pyproject.toml`.
 
@@ -262,7 +273,7 @@ On Windows, red-crawler runs inside WSL2. You need:
 - Do not create login sessions silently; call `login` only when the user asks to authenticate.
 - Keep the Playwright storage state file local and out of commits, logs, and shared artifacts.
 - Do not point it at production data or unknown databases.
-- Do not assume a browser session exists; create `state.json` with `login` first.
+- Do not create or require `state.json` unless the user explicitly asks to authenticate.
 - Do not hard-code machine-specific paths in prompts or config.
 - Prefer relative, workspace-scoped paths for outputs and reports.
 

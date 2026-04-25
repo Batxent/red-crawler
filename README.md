@@ -23,20 +23,24 @@ uv sync
 uv run playwright install chromium
 ```
 
-Save a reusable login session first:
+Run without logging in. If Xiaohongshu shows a login popup, the crawler tries to close it and continue.
+
+Collect creators from the Xiaohongshu cosmetics homefeed:
 
 ```bash
-red-crawler login --save-state "./state.json"
+red-crawler crawl-homefeed \
+  --max-accounts 20 \
+  --db-path "./data/red_crawler.db" \
+  --output-dir "./output"
 ```
 
-It will open a visible browser. Log in to Xiaohongshu there, then come back to the terminal and press Enter to save the session file.
+The default homefeed URL is `https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3`. The crawler reads each card's author link and opens the user profile, not the note page.
 
-Run a manual crawl with an existing Playwright storage state file:
+Run a manual crawl from a known user profile:
 
 ```bash
 red-crawler crawl-seed \
   --seed-url "https://www.xiaohongshu.com/user/profile/USER_ID" \
-  --storage-state "./state.json" \
   --max-accounts 20 \
   --max-depth 2 \
   --gender-filter "女" \
@@ -55,7 +59,6 @@ export BRIGHT_DATA_BROWSER_API_AUTH="SBR_ZONE_FULL_USERNAME:SBR_ZONE_PASSWORD"
 
 red-crawler crawl-search \
   --search-term "抗痘博主" \
-  --storage-state "./state.json" \
   --browser-mode bright-data \
   --output-dir "./output"
 ```
@@ -65,7 +68,6 @@ You can also pass the full CDP endpoint directly:
 ```bash
 red-crawler crawl-seed \
   --seed-url "https://www.xiaohongshu.com/user/profile/USER_ID" \
-  --storage-state "./state.json" \
   --browser-mode bright-data \
   --browser-endpoint "wss://SBR_ZONE_FULL_USERNAME:SBR_ZONE_PASSWORD@brd.superproxy.io:9222"
 ```
@@ -80,7 +82,6 @@ Run a manual crawl for one explicit search term without a `seed_url`:
 ```bash
 red-crawler crawl-search \
   --search-term "抗痘博主" \
-  --storage-state "./state.json" \
   --max-accounts 20 \
   --search-scroll-rounds 8 \
   --creator-only \
@@ -97,7 +98,6 @@ Optional note-page expansion:
 ```bash
 red-crawler crawl-seed \
   --seed-url "https://www.xiaohongshu.com/user/profile/USER_ID" \
-  --storage-state "./state.json" \
   --include-note-recommendations
 ```
 
@@ -114,7 +114,6 @@ Run nightly auto-collection with queue, search bootstrap, seed promotion, and da
 
 ```bash
 red-crawler collect-nightly \
-  --storage-state "./state.json" \
   --db-path "./data/red_crawler.db" \
   --report-dir "./reports" \
   --cache-dir "./.cache/red-crawler" \
@@ -129,7 +128,6 @@ Run the same discovery flow manually without a `seed_url`:
 
 ```bash
 red-crawler crawl-discover \
-  --storage-state "./state.json" \
   --db-path "./data/red_crawler.db" \
   --report-dir "./reports" \
   --cache-dir "./.cache/red-crawler" \
@@ -167,11 +165,12 @@ To install it from a local path, point OpenClaw at that folder, or copy the skil
 Use the OpenClaw skill actions in this order:
 
 - `bootstrap` validates a local working directory and can run Chromium installation when explicitly requested.
-- `login` creates the Playwright storage state explicitly.
-- `crawl_seed` and `collect_nightly` require an authenticated Playwright storage state file.
+- `crawl_homefeed` collects from the default cosmetics homefeed without requiring login.
+- `login` creates an optional Playwright storage state explicitly.
+- `crawl_seed` and `collect_nightly` can run without `--storage-state`; pass one only when you want to reuse an authenticated session.
 - `report_weekly` and `list_contactable` run from the SQLite database and do not require `--storage-state`.
 
-The skill does not clone repositories or create login sessions implicitly. Install the `red-crawler` CLI package first, point `workspace_path` at a local working directory, run `bootstrap` only for reviewed local setup steps, then run `login` when you are ready to create `state.json`.
+The skill does not clone repositories or create login sessions implicitly. Install the `red-crawler` CLI package first, point `workspace_path` at a local working directory, and run `bootstrap` only for reviewed local setup steps.
 
 ## Publishing
 

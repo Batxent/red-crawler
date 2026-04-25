@@ -19,6 +19,7 @@ from red_crawler.models import AccountRecord, ContactLead, CrawlResult, RunRepor
 from red_crawler.profile_url import build_profile_dedupe_key
 from red_crawler.session import (
     BrowserSession,
+    DEFAULT_COSMETICS_HOMEFEED_URL,
     PlaywrightCrawlerClient,
     RiskControlTriggered,
 )
@@ -31,12 +32,14 @@ class CrawlClient(Protocol):
 
     def fetch_search_result_htmls(self, query: str) -> list[str]: ...
 
+    def fetch_homefeed_result_htmls(self, source_url: str) -> list[str]: ...
+
 
 @dataclass
 class CrawlConfig:
     seed_url: str
-    storage_state: str
-    output_dir: str
+    output_dir: str = "output"
+    storage_state: str = ""
     max_accounts: int = 20
     max_depth: int = 2
     include_note_recommendations: bool = False
@@ -53,8 +56,28 @@ class CrawlConfig:
 @dataclass
 class SearchCrawlConfig:
     search_term: str
-    storage_state: str
+    output_dir: str = "output"
+    storage_state: str = ""
+    max_accounts: int = 20
+    search_scroll_rounds: int = 2
+    min_followers: int = 0
+    min_relevance_score: float = 0.0
+    creator_only: bool = False
+    safe_mode: bool = False
+    interaction_mode: str = "playwright"
+    browser_mode: str = "local"
+    browser_endpoint: str | None = None
+    browser_auth: str | None = None
+    cache_dir: str | None = None
+    cache_ttl_days: int = 7
+    gender_filter: str | None = None
+
+
+@dataclass
+class HomefeedCrawlConfig:
     output_dir: str
+    storage_state: str = ""
+    homefeed_url: str = DEFAULT_COSMETICS_HOMEFEED_URL
     max_accounts: int = 20
     search_scroll_rounds: int = 2
     min_followers: int = 0
@@ -140,6 +163,140 @@ def run_crawl_search(config: SearchCrawlConfig) -> CrawlResult:
             cache_ttl_days=config.cache_ttl_days,
         )
         return run_crawl_search_with_client(config, client)
+
+
+def run_crawl_homefeed(config: HomefeedCrawlConfig) -> CrawlResult:
+    with BrowserSession(
+        config.storage_state,
+        browser_mode=config.browser_mode,
+        browser_endpoint=config.browser_endpoint,
+        browser_auth=config.browser_auth,
+    ) as session:
+        client = PlaywrightCrawlerClient(
+            session,
+            safe_mode=config.safe_mode,
+            interaction_mode=config.interaction_mode,
+            search_scroll_rounds=config.search_scroll_rounds,
+            cache_dir=config.cache_dir,
+            cache_ttl_days=config.cache_ttl_days,
+        )
+        return run_crawl_homefeed_with_client(config, client)
+
+
+def run_crawl_homefeed_with_client(
+    config: HomefeedCrawlConfig, client: CrawlClient
+) -> CrawlResult:
+    gender_filter = _normalize_gender_filter(config.gender_filter)
+    accounts: list[AccountRecord] = []
+    contact_leads: list[ContactLead] = []
+    errors: list[dict[str, str]] = []
+    aborted = False
+    abort_reason: str | None = None
+    queued_keys: set[str] = set()
+    source_payload: Dict[str, object] = {
+        "bio_text": "彩妆博主",
+        "visible_metadata": {"tags": ["彩妆", "美妆"]},
+    }
+
+    try:
+        html_snapshots = client.fetch_homefeed_result_htmls(config.homefeed_url)
+    except RiskControlTriggered as exc:
+        aborted = True
+        abort_reason = str(exc)
+        errors.append({"source": config.homefeed_url, "error": str(exc)})
+        html_snapshots = []
+
+    candidates: list[dict[str, object]] = []
+    for html in html_snapshots:
+        remaining_slots = config.max_accounts - len(queued_keys)
+        if remaining_slots <= 0:
+            break
+        for candidate in extract_search_result_profiles(
+            html=html,
+            max_results=remaining_slots,
+        ):
+            candidate_key = build_profile_dedupe_key(
+                candidate["profile_url"],
+                str(candidate.get("account_id", "")),
+            )
+            if candidate_key in queued_keys:
+                continue
+            queued_keys.add(candidate_key)
+            candidates.append(candidate)
+            if len(candidates) >= config.max_accounts:
+                break
+
+    for candidate in candidates:
+        profile_url = str(candidate["profile_url"])
+        try:
+            html = client.fetch_profile_html(profile_url)
+            account = parse_profile_html(
+                html=html,
+                profile_url=profile_url,
+                source_type="homefeed",
+                source_from=config.homefeed_url,
+            )
+            account.discovery_depth = 0
+            account_payload = {
+                "nickname": account.nickname,
+                "bio_text": account.bio_text,
+                "visible_metadata": account.visible_metadata,
+            }
+            account.creator_segment = classify_creator_segment(account_payload)
+            account.relevance_score = score_creator_relevance(
+                seed_account=source_payload,
+                candidate_account=account_payload,
+            )
+            follower_count = parse_follower_count(
+                str(account.visible_metadata.get("followers", ""))
+            )
+            if config.creator_only and account.creator_segment != "creator":
+                continue
+            if follower_count < max(config.min_followers, 0):
+                continue
+            if account.relevance_score < config.min_relevance_score:
+                continue
+            if _matches_gender_filter(account, gender_filter):
+                accounts.append(account)
+                contact_leads.extend(
+                    extract_contact_leads(
+                        account_id=account.account_id,
+                        bio_text=account.bio_text,
+                    )
+                )
+        except RiskControlTriggered as exc:
+            aborted = True
+            abort_reason = str(exc)
+            errors.append({"profile_url": profile_url, "error": str(exc)})
+            break
+        except Exception as exc:
+            accounts.append(
+                build_failed_account_record(
+                    profile_url=profile_url,
+                    source_type="homefeed",
+                    source_from=config.homefeed_url,
+                    error=str(exc),
+                    discovery_depth=0,
+                )
+            )
+            errors.append({"profile_url": profile_url, "error": str(exc)})
+
+    lead_counts = dict(sorted(Counter(lead.lead_type for lead in contact_leads).items()))
+    failed_accounts = sum(1 for account in accounts if account.crawl_status != "success")
+    return CrawlResult(
+        accounts=accounts,
+        contact_leads=contact_leads,
+        run_report=RunReport(
+            seed_url=f"homefeed:{config.homefeed_url}",
+            attempted_accounts=len(accounts),
+            succeeded_accounts=len(accounts) - failed_accounts,
+            failed_accounts=failed_accounts,
+            lead_counts=lead_counts,
+            aborted=aborted,
+            abort_reason=abort_reason,
+            errors=errors,
+        ),
+    )
 
 
 def run_crawl_search_with_client(

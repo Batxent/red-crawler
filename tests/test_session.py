@@ -89,6 +89,57 @@ def test_browser_session_connects_to_bright_data_cdp(tmp_path, monkeypatch):
     }
 
 
+def test_browser_session_can_start_without_storage_state(monkeypatch):
+    captured = {}
+
+    class FakeContext:
+        browser = None
+
+    class FakeBrowser:
+        def close(self):
+            captured["browser_closed"] = True
+
+    class FakeChromium:
+        def launch(self, headless):
+            captured["headless"] = headless
+            return FakeBrowser()
+
+    class FakePlaywright:
+        chromium = FakeChromium()
+
+        def stop(self):
+            captured["playwright_stopped"] = True
+
+    class FakeSyncPlaywright:
+        def start(self):
+            return FakePlaywright()
+
+    class FakeFingerprintGenerator:
+        def __init__(self, os):
+            captured["fingerprint_os"] = os
+
+        def generate(self):
+            return "fingerprint"
+
+    def fake_new_context(browser, **kwargs):
+        captured["browser"] = browser
+        captured["context_kwargs"] = kwargs
+        return FakeContext()
+
+    monkeypatch.setattr(session_module, "sync_playwright", lambda: FakeSyncPlaywright())
+    monkeypatch.setattr(session_module, "FingerprintGenerator", FakeFingerprintGenerator)
+    monkeypatch.setattr(session_module, "NewContext", fake_new_context)
+
+    with BrowserSession() as browser_session:
+        assert isinstance(browser_session.context, FakeContext)
+
+    assert captured["headless"] is False
+    assert captured["fingerprint_os"] == ("windows",)
+    assert captured["context_kwargs"] == {"fingerprint": "fingerprint"}
+    assert captured["browser_closed"] is True
+    assert captured["playwright_stopped"] is True
+
+
 def test_apply_stealth_uses_stealth_api(monkeypatch):
     calls = []
 
@@ -503,6 +554,60 @@ def test_classify_high_risk_page_detects_verification_and_login_expiry():
     assert classify_high_risk_page("请完成安全验证后继续访问") == "verification"
     assert classify_high_risk_page("登录后查看更多内容") == "login_required"
     assert classify_high_risk_page("正常的主页内容") is None
+
+
+def test_playwright_crawler_client_dismisses_login_dialog_before_classifying():
+    clicks = []
+
+    class CloseLocator:
+        def count(self):
+            return 1
+
+        def nth(self, _index):
+            return self
+
+        def is_visible(self, timeout):
+            return True
+
+        def click(self, timeout):
+            clicks.append(timeout)
+
+    class BodyLocator:
+        def __init__(self, page):
+            self.page = page
+
+        def inner_text(self):
+            return (
+                "登录后查看更多内容"
+                if not clicks
+                else "正常的彩妆首页内容"
+            )
+
+    class EmptyLocator:
+        def count(self):
+            return 0
+
+    class FakePage:
+        def locator(self, selector):
+            if selector == "body":
+                return BodyLocator(self)
+            if selector == "button[aria-label='关闭']":
+                return CloseLocator()
+            return EmptyLocator()
+
+        def wait_for_timeout(self, _ms):
+            return None
+
+    client = PlaywrightCrawlerClient(object(), safe_mode=False)
+
+    assert (
+        client._classify_page_after_dialog_dismissal(
+            FakePage(),
+            "登录后查看更多内容",
+        )
+        is None
+    )
+    assert clicks == [1000]
 
 
 def test_safe_mode_controller_logs_circuit_breaker_reason():

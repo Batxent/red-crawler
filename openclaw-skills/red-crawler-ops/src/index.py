@@ -11,6 +11,7 @@ KNOWN_ACTIONS = {
     "bootstrap",
     "login",
     "crawl_seed",
+    "crawl_homefeed",
     "collect_nightly",
     "report_weekly",
     "list_contactable",
@@ -18,6 +19,7 @@ KNOWN_ACTIONS = {
 
 EXPECTED_ARTIFACTS = {
     "crawl_seed": ("accounts.csv", "contact_leads.csv", "run_report.json"),
+    "crawl_homefeed": ("accounts.csv", "contact_leads.csv", "run_report.json"),
     "collect_nightly": (
         "daily-run-report.json",
         "weekly-growth-report.json",
@@ -37,6 +39,7 @@ CONFIG_DEFAULTS = (
 
 CLI_ARTIFACT_DEFAULTS = {
     "crawl_seed": "output",
+    "crawl_homefeed": "output",
     "collect_nightly": "reports",
     "report_weekly": "reports",
 }
@@ -138,6 +141,22 @@ def build_crawl_seed_command(resolved):
     return argv
 
 
+def build_crawl_homefeed_command(resolved):
+    argv = _get_runner_command(resolved) + ["crawl-homefeed"]
+    _extend_flag(argv, "--homefeed-url", resolved.get("homefeed_url"))
+    _extend_flag(argv, "--storage-state", resolved.get("storage_state"))
+    _extend_flag(argv, "--max-accounts", resolved.get("max_accounts"))
+    _extend_flag(argv, "--search-scroll-rounds", resolved.get("search_scroll_rounds"))
+    _extend_bool_flag(argv, "--safe-mode", resolved.get("safe_mode"))
+    _extend_flag(argv, "--cache-dir", resolved.get("cache_dir"))
+    _extend_flag(argv, "--cache-ttl-days", resolved.get("cache_ttl_days"))
+    _extend_flag(argv, "--gender-filter", resolved.get("gender_filter"))
+    _extend_browser_flags(argv, resolved)
+    _extend_flag(argv, "--db-path", resolved.get("db_path"))
+    _extend_flag(argv, "--output-dir", resolved.get("output_dir"))
+    return argv
+
+
 def build_collect_nightly_command(resolved):
     argv = _get_runner_command(resolved) + ["collect-nightly"]
     _extend_flag(argv, "--storage-state", resolved.get("storage_state"))
@@ -188,6 +207,8 @@ def build_command(resolved):
         return build_login_command(resolved)
     if action == "crawl_seed":
         return build_crawl_seed_command(resolved)
+    if action == "crawl_homefeed":
+        return build_crawl_homefeed_command(resolved)
     if action == "collect_nightly":
         return build_collect_nightly_command(resolved)
     if action == "report_weekly":
@@ -239,7 +260,7 @@ def _resolve_artifact_dir(path_value, resolved):
 
 
 def _artifact_root(action, resolved):
-    if action == "crawl_seed":
+    if action in {"crawl_seed", "crawl_homefeed"}:
         return _resolve_artifact_dir(resolved.get("output_dir"), resolved)
     if action in {"collect_nightly", "report_weekly"}:
         return _resolve_artifact_dir(resolved.get("report_dir"), resolved)
@@ -272,7 +293,7 @@ def validate_request(resolved):
             "validation_error",
             f"Unsupported action: {resolved.get('action')}",
             (
-                "Use one of: bootstrap, login, crawl_seed, "
+                "Use one of: bootstrap, login, crawl_seed, crawl_homefeed, "
                 "collect_nightly, report_weekly, list_contactable."
             ),
         )
@@ -292,9 +313,7 @@ def validate_request(resolved):
             "Provide workspace_path directly or set it in context.config.",
         )
 
-    if action in {"login", "crawl_seed", "collect_nightly"} and not resolved.get(
-        "storage_state"
-    ):
+    if action == "login" and not resolved.get("storage_state"):
         return structured_error(
             "configuration_error",
             f"storage_state is required for {action}.",
@@ -330,13 +349,13 @@ def validate_request(resolved):
             "Point workspace_path at a red-crawler checkout, or install the published CLI and disable local-checkout-only setup.",
         )
 
-    if action in {"crawl_seed", "collect_nightly"}:
+    if action in {"crawl_seed", "crawl_homefeed", "collect_nightly"} and resolved.get("storage_state"):
         state_path = _resolve_workspace_path_value(resolved["storage_state"], resolved)
         if not state_path.exists():
             return structured_error(
                 "configuration_error",
                 f"storage_state file does not exist: {state_path}",
-                "Run login first and keep the Playwright storage state file local.",
+                "Run login first, or remove storage_state to crawl without an authenticated session.",
             )
 
     return {"status": "ok", "action": action, "resolved": resolved}
@@ -403,7 +422,7 @@ def _bootstrap_result(resolved):
         "command": " && ".join(command_displays),
         "artifacts": {"workspace_path": str(_workspace_root(resolved))},
         "metrics": metrics,
-        "next_step": "Run login to create a local Playwright storage state before crawling.",
+        "next_step": "Run crawl_homefeed or crawl_seed; login is optional if you want an authenticated storage state.",
         "summary": "bootstrap completed successfully.",
         "stdout": "",
         "stderr": "",

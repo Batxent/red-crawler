@@ -35,6 +35,7 @@ def test_skill_metadata_contract_matches_runtime():
     assert "runtime: python" in MANIFEST_TEXT
     assert "entry: src/index.py" in MANIFEST_TEXT
     assert "- bootstrap" in MANIFEST_TEXT
+    assert "- crawl_homefeed" in MANIFEST_TEXT
     assert "- install_or_bootstrap" not in MANIFEST_TEXT
     assert "remote_repository_clone: false" in MANIFEST_TEXT
     assert "default_crawl_budget:" in MANIFEST_TEXT
@@ -60,11 +61,12 @@ def test_skill_metadata_contract_matches_runtime():
     assert "repo_url:" not in CONFIG_EXAMPLE_TEXT
     assert "workspace_parent:" not in CONFIG_EXAMPLE_TEXT
     assert "workspace_name:" not in CONFIG_EXAMPLE_TEXT
-    assert "storage_state: ./state.json" in CONFIG_EXAMPLE_TEXT
+    assert "storage_state:" in CONFIG_EXAMPLE_TEXT
     assert "db_path: ./data/red_crawler.db" in CONFIG_EXAMPLE_TEXT
     assert "report_dir: ./reports" in CONFIG_EXAMPLE_TEXT
     assert "output_dir: ./output" in CONFIG_EXAMPLE_TEXT
     assert "cache_dir: ./.cache/red-crawler" in CONFIG_EXAMPLE_TEXT
+    assert "homefeed_url: https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3" in CONFIG_EXAMPLE_TEXT
     assert "browser_mode: local" in CONFIG_EXAMPLE_TEXT
     assert "sync_dependencies: false" in CONFIG_EXAMPLE_TEXT
     assert "install_browser: false" in CONFIG_EXAMPLE_TEXT
@@ -80,8 +82,9 @@ def test_skill_docs_match_storage_state_behavior():
     assert "never clones a repository" in SKILL_TEXT
     assert "Install `red-crawler` as a package" in SKILL_TEXT
     assert "Keep the Playwright storage state file local" in SKILL_TEXT
-    assert "login` creates the Playwright storage state explicitly" in SKILL_TEXT
+    assert "login` creates an optional Playwright storage state explicitly" in SKILL_TEXT
     assert "crawl_seed" in SKILL_TEXT
+    assert "crawl_homefeed" in SKILL_TEXT
     assert "collect_nightly" in SKILL_TEXT
     assert "report_weekly" in SKILL_TEXT
     assert "list_contactable" in SKILL_TEXT
@@ -90,15 +93,16 @@ def test_skill_docs_match_storage_state_behavior():
         "Early validation or configuration failures may omit `action`, `command`, "
         "`stdout`, and `stderr`"
     ) in SKILL_TEXT
-    assert "Save a reusable login session first" in README_TEXT
-    assert "Run a manual crawl with an existing Playwright storage state file" in README_TEXT
+    assert "Run without logging in" in README_TEXT
+    assert "crawl-homefeed" in README_TEXT
+    assert "opens the user profile, not the note page" in README_TEXT
     assert "List high-quality contactable creators from the SQLite database" in README_TEXT
     assert "Use the OpenClaw skill actions in this order" in README_TEXT
     assert "install_or_bootstrap" not in README_TEXT
     assert "does not clone repositories" in README_TEXT
     assert "bootstrap" in README_TEXT
-    assert "login` creates the Playwright storage state explicitly" in README_TEXT
-    assert "crawl_seed` and `collect_nightly` require an authenticated Playwright storage state file" in README_TEXT
+    assert "login` creates an optional Playwright storage state explicitly" in README_TEXT
+    assert "crawl_seed` and `collect_nightly` can run without `--storage-state`" in README_TEXT
     assert "report_weekly` and `list_contactable` run from the SQLite database and do not require `--storage-state`" in README_TEXT
 
 
@@ -141,7 +145,9 @@ def test_bootstrap_does_not_run_setup_or_login_by_default(
         "uv_sync_ran": False,
         "playwright_install_ran": False,
     }
-    assert result["next_step"] == "Run login to create a local Playwright storage state before crawling."
+    assert result["next_step"] == (
+        "Run crawl_homefeed or crawl_seed; login is optional if you want an authenticated storage state."
+    )
     assert commands == []
 
 
@@ -183,18 +189,31 @@ def test_crawl_seed_requires_seed_url():
     assert "seed_url" in result["message"]
 
 
-def test_collect_nightly_requires_storage_state():
+def test_collect_nightly_requires_existing_workspace_without_storage_state():
     result = run_handler(
         {"action": "collect_nightly", "workspace_path": "/tmp/project"},
         {"config": {}},
     )
     assert result["status"] == "error"
     assert result["error_type"] == "configuration_error"
-    assert "storage_state" in result["suggested_fix"]
+    assert "existing directory" in result["message"]
 
 
-def test_crawl_seed_requires_storage_state(tmp_path):
+def test_crawl_seed_does_not_require_storage_state(tmp_path, monkeypatch):
     (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "accounts.csv").write_text("id\n", encoding="utf-8")
+    (output_dir / "contact_leads.csv").write_text("id\n", encoding="utf-8")
+    (output_dir / "run_report.json").write_text("{}", encoding="utf-8")
+    commands = []
+
+    def fake_run(argv, cwd, capture_output, text):
+        commands.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(INDEX_MODULE.subprocess, "run", fake_run)
+
     result = run_handler(
         {
             "action": "crawl_seed",
@@ -203,9 +222,8 @@ def test_crawl_seed_requires_storage_state(tmp_path):
         },
         {"config": {}},
     )
-    assert result["status"] == "error"
-    assert result["error_type"] == "configuration_error"
-    assert "storage_state" in result["suggested_fix"]
+    assert result["status"] == "success"
+    assert "--storage-state" not in commands[0]
 
 
 def test_crawl_seed_requires_existing_storage_state_file(tmp_path):
@@ -577,6 +595,29 @@ def test_build_crawl_seed_command_supports_bright_data_browser(tmp_path):
         "bright-data",
         "--browser-auth",
         "user:pass",
+    ]
+
+
+def test_build_crawl_homefeed_command_uses_cosmetics_homefeed(tmp_path):
+    command = build_command(
+        {
+            "action": "crawl_homefeed",
+            "workspace_path": str(tmp_path),
+            "homefeed_url": "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3",
+            "max_accounts": 8,
+            "output_dir": "output",
+        }
+    )
+
+    assert command == [
+        "red-crawler",
+        "crawl-homefeed",
+        "--homefeed-url",
+        "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3",
+        "--max-accounts",
+        "8",
+        "--output-dir",
+        "output",
     ]
 
 
