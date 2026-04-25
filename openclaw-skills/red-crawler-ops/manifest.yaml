@@ -57,11 +57,11 @@ config:
     description: Default list limit used when list_contactable does not receive one.
 input_schema:
   type: object
-  required:
-    - action
   properties:
     action:
       type: string
+      default: crawl_homefeed
+      description: Action to run. Defaults to crawl_homefeed.
       enum:
         - bootstrap
         - login
@@ -106,6 +106,16 @@ input_schema:
       type: string
     browser_auth:
       type: string
+    proxy:
+      type: string
+    proxy_list:
+      type: string
+    rotation_mode:
+      type: string
+    rotation_retries:
+      type: integer
+    randomize_headers:
+      type: boolean
     max_accounts:
       type: integer
     max_depth:

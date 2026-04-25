@@ -56,6 +56,7 @@ def test_skill_metadata_contract_matches_runtime():
     assert "stderr:" in output_schema
     assert "command:" in output_schema
     assert "runner_command:" in CONFIG_EXAMPLE_TEXT
+    assert "action: crawl_homefeed" in CONFIG_EXAMPLE_TEXT
     assert "workspace_path: ." in CONFIG_EXAMPLE_TEXT
     assert "require_local_checkout: false" in CONFIG_EXAMPLE_TEXT
     assert "repo_url:" not in CONFIG_EXAMPLE_TEXT
@@ -68,6 +69,11 @@ def test_skill_metadata_contract_matches_runtime():
     assert "cache_dir: ./.cache/red-crawler" in CONFIG_EXAMPLE_TEXT
     assert "homefeed_url: https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3" in CONFIG_EXAMPLE_TEXT
     assert "browser_mode: local" in CONFIG_EXAMPLE_TEXT
+    assert "proxy:" in CONFIG_EXAMPLE_TEXT
+    assert "proxy_list:" in CONFIG_EXAMPLE_TEXT
+    assert "rotation_mode: none" in CONFIG_EXAMPLE_TEXT
+    assert "rotation_retries: 1" in CONFIG_EXAMPLE_TEXT
+    assert "randomize_headers: true" in CONFIG_EXAMPLE_TEXT
     assert "sync_dependencies: false" in CONFIG_EXAMPLE_TEXT
     assert "install_browser: false" in CONFIG_EXAMPLE_TEXT
     assert "- red-crawler" in CONFIG_EXAMPLE_TEXT
@@ -84,7 +90,7 @@ def test_skill_docs_match_storage_state_behavior():
     assert "Keep the Playwright storage state file local" in SKILL_TEXT
     assert "login` creates an optional Playwright storage state explicitly" in SKILL_TEXT
     assert "crawl_seed" in SKILL_TEXT
-    assert "crawl_homefeed" in SKILL_TEXT
+    assert "crawl_homefeed` (default when omitted)" in SKILL_TEXT
     assert "collect_nightly" in SKILL_TEXT
     assert "report_weekly" in SKILL_TEXT
     assert "list_contactable" in SKILL_TEXT
@@ -116,6 +122,40 @@ def test_install_or_bootstrap_is_not_supported():
     assert result["error_type"] == "validation_error"
     assert "Unsupported action" in result["message"]
     assert "install_or_bootstrap" not in result["suggested_fix"]
+
+
+def test_handler_defaults_to_crawl_homefeed_when_action_is_omitted(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "accounts.csv").write_text("id\n", encoding="utf-8")
+    (output_dir / "contact_leads.csv").write_text("id\n", encoding="utf-8")
+    (output_dir / "run_report.json").write_text("{}", encoding="utf-8")
+    commands = []
+
+    def fake_run(argv, cwd, capture_output, text):
+        commands.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(INDEX_MODULE.subprocess, "run", fake_run)
+
+    result = run_handler(
+        {"workspace_path": str(tmp_path), "max_accounts": 3},
+        {"config": {}},
+    )
+
+    assert result["status"] == "success"
+    assert result["action"] == "crawl_homefeed"
+    assert commands == [
+        [
+            "red-crawler",
+            "crawl-homefeed",
+            "--max-accounts",
+            "3",
+        ]
+    ]
 
 
 def test_bootstrap_does_not_run_setup_or_login_by_default(
@@ -595,6 +635,31 @@ def test_build_crawl_seed_command_supports_bright_data_browser(tmp_path):
         "bright-data",
         "--browser-auth",
         "user:pass",
+    ]
+
+
+def test_build_crawl_homefeed_command_supports_proxy_rotation(tmp_path):
+    command = build_command(
+        {
+            "action": "crawl_homefeed",
+            "workspace_path": str(tmp_path),
+            "proxy_list": "proxies.txt",
+            "rotation_mode": "session",
+            "rotation_retries": 2,
+            "randomize_headers": False,
+        }
+    )
+
+    assert command == [
+        "red-crawler",
+        "crawl-homefeed",
+        "--proxy-list",
+        "proxies.txt",
+        "--rotation-mode",
+        "session",
+        "--rotation-retries",
+        "2",
+        "--no-randomize-headers",
     ]
 
 

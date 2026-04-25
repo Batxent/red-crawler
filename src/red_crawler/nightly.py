@@ -103,6 +103,11 @@ class NightlyCollectConfig:
     browser_mode: str = "local"
     browser_endpoint: str | None = None
     browser_auth: str | None = None
+    rotation_mode: str = "none"
+    rotation_retries: int = 1
+    randomize_headers: bool = True
+    proxy: str | None = None
+    proxy_list: str | None = None
     cache_ttl_days: int = 7
     refresh_after_days: int = 14
     min_relevance_score: float = 0.7
@@ -481,26 +486,67 @@ def run_nightly_collection(config: NightlyCollectConfig) -> NightlyCollectResult
         log_fn=print,
     )
     store = CrawlerStore(config.db_path)
-    with BrowserSession(
-        config.storage_state,
-        browser_mode=config.browser_mode,
-        browser_endpoint=config.browser_endpoint,
-        browser_auth=config.browser_auth,
-    ) as session:
-        client = PlaywrightCrawlerClient(
-            session,
-            safe_mode=config.safe_mode,
-            safe_mode_controller=SafeModeController(
-                enabled=config.safe_mode,
-                log_fn=print if config.safe_mode else (lambda _message: None),
-                pause_every=2,
-                risk_threshold=1,
-            ),
-            interaction_mode=config.interaction_mode,
-            cache_dir=config.cache_dir,
-            cache_ttl_days=config.cache_ttl_days,
-        )
-        result = collect_nightly_with_client(config, client, store=store)
+    proxy_pool = _load_nightly_proxy_pool(config)
+    attempts = 1
+    if config.rotation_mode == "session":
+        attempts += max(config.rotation_retries, 0)
+    last_result: NightlyCollectResult | None = None
+    for attempt in range(attempts):
+        proxy_url = proxy_pool[attempt % len(proxy_pool)] if proxy_pool else None
+        with BrowserSession(
+            config.storage_state,
+            browser_mode=config.browser_mode,
+            browser_endpoint=config.browser_endpoint,
+            browser_auth=config.browser_auth,
+            rotation_mode=config.rotation_mode,
+            randomize_headers=config.randomize_headers,
+            proxy_url=proxy_url,
+        ) as session:
+            client = PlaywrightCrawlerClient(
+                session,
+                safe_mode=config.safe_mode,
+                safe_mode_controller=SafeModeController(
+                    enabled=config.safe_mode,
+                    log_fn=print if config.safe_mode else (lambda _message: None),
+                    pause_every=2,
+                    risk_threshold=1,
+                ),
+                interaction_mode=config.interaction_mode,
+                cache_dir=config.cache_dir,
+                cache_ttl_days=config.cache_ttl_days,
+            )
+            result = collect_nightly_with_client(config, client, store=store)
         result.startup_delay_seconds = startup_delay
-        write_daily_report(result, config.report_dir)
-        return result
+        last_result = result
+        if not _nightly_result_needs_rotation_retry(result) or attempt >= attempts - 1:
+            write_daily_report(result, config.report_dir)
+            return result
+    if last_result is None:
+        raise RuntimeError("nightly collection did not run")
+    write_daily_report(last_result, config.report_dir)
+    return last_result
+
+
+def _load_nightly_proxy_pool(config: NightlyCollectConfig) -> list[str]:
+    proxies: list[str] = []
+    if config.proxy:
+        proxies.append(config.proxy.strip())
+    if config.proxy_list:
+        for line in Path(config.proxy_list).read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                proxies.append(stripped)
+    seen = set()
+    deduped = []
+    for proxy in proxies:
+        if proxy and proxy not in seen:
+            seen.add(proxy)
+            deduped.append(proxy)
+    return deduped
+
+
+def _nightly_result_needs_rotation_retry(result: NightlyCollectResult) -> bool:
+    retry_markers = {"http_403", "http_429"}
+    if result.abort_reason in retry_markers:
+        return True
+    return False

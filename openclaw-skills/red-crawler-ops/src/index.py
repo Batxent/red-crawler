@@ -45,6 +45,7 @@ CLI_ARTIFACT_DEFAULTS = {
 }
 
 EXPECTED_PROJECT_NAME = "red-crawler"
+DEFAULT_ACTION = "crawl_homefeed"
 
 
 def extract_config(context):
@@ -69,6 +70,8 @@ def merge_config(input_data, context):
     for default_key, target_key in CONFIG_DEFAULTS:
         if target_key not in merged and merged.get(default_key) is not None:
             merged[target_key] = merged[default_key]
+    if not str(merged.get("action", "")).strip():
+        merged["action"] = DEFAULT_ACTION
     return merged
 
 
@@ -111,6 +114,12 @@ def _extend_browser_flags(argv, resolved):
     _extend_flag(argv, "--browser-mode", resolved.get("browser_mode"))
     _extend_flag(argv, "--browser-endpoint", resolved.get("browser_endpoint"))
     _extend_flag(argv, "--browser-auth", resolved.get("browser_auth"))
+    _extend_flag(argv, "--proxy", resolved.get("proxy"))
+    _extend_flag(argv, "--proxy-list", resolved.get("proxy_list"))
+    _extend_flag(argv, "--rotation-mode", resolved.get("rotation_mode"))
+    _extend_flag(argv, "--rotation-retries", resolved.get("rotation_retries"))
+    if resolved.get("randomize_headers") is False:
+        argv.append("--no-randomize-headers")
 
 
 def build_login_command(resolved):

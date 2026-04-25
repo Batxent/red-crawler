@@ -27,6 +27,7 @@ from red_crawler.session import (
     DEFAULT_COSMETICS_HOMEFEED_URL,
     SUPPORTED_BROWSER_MODES,
     SUPPORTED_INTERACTION_MODES,
+    SUPPORTED_ROTATION_MODES,
     open_xiaohongshu,
     save_login_storage_state,
     start_qr_login_storage_state,
@@ -56,7 +57,40 @@ def _add_browser_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--browser-auth",
-        help="Bright Data Browser API credentials formatted as USER:PASS.",
+        help="Bright Data Browser API credentials formatted as USER:PASS. Use {session} to inject a rotating session id.",
+    )
+    parser.add_argument(
+        "--proxy",
+        help="Proxy URL for local browser mode, for example http://user:pass@host:port or socks5://host:port.",
+    )
+    parser.add_argument(
+        "--proxy-list",
+        help="Path to a newline-delimited proxy list. With --rotation-mode session, each retry uses the next proxy.",
+    )
+    parser.add_argument(
+        "--rotation-mode",
+        choices=SUPPORTED_ROTATION_MODES,
+        default="none",
+        help="Proxy rotation mode. session retries the crawl with a new browser session on 403/429.",
+    )
+    parser.add_argument(
+        "--rotation-retries",
+        type=int,
+        default=1,
+        help="Number of new browser sessions to try after 403/429 when session rotation is enabled.",
+    )
+    parser.set_defaults(randomize_headers=True)
+    parser.add_argument(
+        "--randomize-headers",
+        dest="randomize_headers",
+        action="store_true",
+        help="Generate a User-Agent, Accept-Language, and Sec-CH-UA header set per browser session.",
+    )
+    parser.add_argument(
+        "--no-randomize-headers",
+        dest="randomize_headers",
+        action="store_false",
+        help="Disable per-session request header randomization.",
     )
 
 
@@ -297,6 +331,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             browser_mode=args.browser_mode,
             browser_endpoint=args.browser_endpoint,
             browser_auth=args.browser_auth,
+            rotation_mode=args.rotation_mode,
+            rotation_retries=args.rotation_retries,
+            randomize_headers=args.randomize_headers,
+            proxy=args.proxy,
+            proxy_list=args.proxy_list,
         )
         run_nightly_collection(config)
         return 0
@@ -369,6 +408,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             browser_mode=args.browser_mode,
             browser_endpoint=args.browser_endpoint,
             browser_auth=args.browser_auth,
+            rotation_mode=args.rotation_mode,
+            rotation_retries=args.rotation_retries,
+            randomize_headers=args.randomize_headers,
+            proxy=args.proxy,
+            proxy_list=args.proxy_list,
             cache_dir=args.cache_dir,
             cache_ttl_days=args.cache_ttl_days,
             gender_filter=args.gender_filter,
@@ -400,6 +444,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             browser_mode=args.browser_mode,
             browser_endpoint=args.browser_endpoint,
             browser_auth=args.browser_auth,
+            rotation_mode=args.rotation_mode,
+            rotation_retries=args.rotation_retries,
+            randomize_headers=args.randomize_headers,
+            proxy=args.proxy,
+            proxy_list=args.proxy_list,
             cache_dir=args.cache_dir,
             cache_ttl_days=args.cache_ttl_days,
             gender_filter=args.gender_filter,
@@ -431,6 +480,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         browser_mode=args.browser_mode,
         browser_endpoint=args.browser_endpoint,
         browser_auth=args.browser_auth,
+        rotation_mode=args.rotation_mode,
+        rotation_retries=args.rotation_retries,
+        randomize_headers=args.randomize_headers,
+        proxy=args.proxy,
+        proxy_list=args.proxy_list,
         cache_dir=args.cache_dir,
         cache_ttl_days=args.cache_ttl_days,
         gender_filter=args.gender_filter,

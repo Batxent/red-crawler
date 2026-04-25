@@ -3,7 +3,9 @@
 import red_crawler.session as session_module
 from red_crawler.session import (
     BrowserSession,
+    build_random_headers,
     build_bright_data_browser_api_endpoint,
+    build_playwright_proxy,
     build_mouse_backend,
     apply_stealth,
     classify_high_risk_page,
@@ -35,6 +37,37 @@ def test_build_bright_data_browser_api_endpoint_prefers_explicit_endpoint():
     )
 
     assert endpoint == "wss://user:pass@custom.example:9222"
+
+
+def test_build_bright_data_browser_api_endpoint_injects_session_id():
+    endpoint = build_bright_data_browser_api_endpoint(
+        auth="brd-customer-zone-session-{session}:pass",
+        session_id="abc123",
+        environ={},
+    )
+
+    assert endpoint == "wss://brd-customer-zone-session-abc123:pass@brd.superproxy.io:9222"
+
+
+def test_build_playwright_proxy_parses_credentials():
+    assert build_playwright_proxy("http://user:pa%40ss@proxy.example:8080") == {
+        "server": "http://proxy.example:8080",
+        "username": "user",
+        "password": "pa@ss",
+    }
+    assert build_playwright_proxy("proxy.example:8080") == {
+        "server": "http://proxy.example:8080",
+    }
+
+
+def test_build_random_headers_are_stable_per_proxy_identity():
+    first = build_random_headers(identity="proxy:http://proxy-one:8080")
+    second = build_random_headers(identity="proxy:http://proxy-one:8080")
+    direct = build_random_headers(identity="local-direct")
+
+    assert first == second
+    assert first["User-Agent"] in session_module.USER_AGENT_POOL
+    assert direct == build_random_headers(identity="local-direct")
 
 
 def test_browser_session_connects_to_bright_data_cdp(tmp_path, monkeypatch):
@@ -77,6 +110,7 @@ def test_browser_session_connects_to_bright_data_cdp(tmp_path, monkeypatch):
         str(state_path),
         browser_mode="bright-data",
         browser_auth="user:pass",
+        randomize_headers=False,
     ) as browser_session:
         assert isinstance(browser_session.context, FakeContext)
 
@@ -100,8 +134,8 @@ def test_browser_session_can_start_without_storage_state(monkeypatch):
             captured["browser_closed"] = True
 
     class FakeChromium:
-        def launch(self, headless):
-            captured["headless"] = headless
+        def launch(self, **kwargs):
+            captured["launch_kwargs"] = kwargs
             return FakeBrowser()
 
     class FakePlaywright:
@@ -130,14 +164,63 @@ def test_browser_session_can_start_without_storage_state(monkeypatch):
     monkeypatch.setattr(session_module, "FingerprintGenerator", FakeFingerprintGenerator)
     monkeypatch.setattr(session_module, "NewContext", fake_new_context)
 
-    with BrowserSession() as browser_session:
+    with BrowserSession(randomize_headers=False) as browser_session:
         assert isinstance(browser_session.context, FakeContext)
 
-    assert captured["headless"] is False
+    assert captured["launch_kwargs"] == {"headless": False}
     assert captured["fingerprint_os"] == ("windows",)
     assert captured["context_kwargs"] == {"fingerprint": "fingerprint"}
     assert captured["browser_closed"] is True
     assert captured["playwright_stopped"] is True
+
+
+def test_browser_session_passes_proxy_to_local_browser(monkeypatch):
+    captured = {}
+
+    class FakeContext:
+        browser = None
+
+    class FakeBrowser:
+        def close(self):
+            pass
+
+    class FakeChromium:
+        def launch(self, **kwargs):
+            captured["launch_kwargs"] = kwargs
+            return FakeBrowser()
+
+    class FakePlaywright:
+        chromium = FakeChromium()
+
+        def stop(self):
+            pass
+
+    class FakeSyncPlaywright:
+        def start(self):
+            return FakePlaywright()
+
+    monkeypatch.setattr(session_module, "sync_playwright", lambda: FakeSyncPlaywright())
+    monkeypatch.setattr(
+        session_module,
+        "FingerprintGenerator",
+        lambda os: type("FG", (), {"generate": lambda _self: "fingerprint"})(),
+    )
+    monkeypatch.setattr(session_module, "NewContext", lambda _browser, **_kwargs: FakeContext())
+
+    with BrowserSession(
+        proxy_url="socks5://user:pass@127.0.0.1:1080",
+        randomize_headers=False,
+    ):
+        pass
+
+    assert captured["launch_kwargs"] == {
+        "headless": False,
+        "proxy": {
+            "server": "socks5://127.0.0.1:1080",
+            "username": "user",
+            "password": "pass",
+        },
+    }
 
 
 def test_apply_stealth_uses_stealth_api(monkeypatch):
@@ -497,6 +580,43 @@ def test_safe_mode_controller_skips_dom_hover_in_os_mouse_mode():
     assert hover_calls == []
     assert sleeps == [1.1]
     assert move_calls == [(60.0, 60.0, 5)]
+
+
+def test_safe_mode_controller_mouse_click_dwells_at_least_200ms():
+    clicks = []
+    moves = []
+
+    class FakeRandom:
+        def uniform(self, start, end):
+            return (start + end) / 2
+
+    class FakeBackend:
+        drives_system_cursor = False
+
+        def move(self, page, x, y, *, steps):
+            moves.append((x, y, steps))
+
+        def click(self, page, x, y, *, delay_ms):
+            clicks.append((x, y, delay_ms))
+            return True
+
+        def wheel(self, page, *, delta_y):
+            return True
+
+    class FakeLocator:
+        def bounding_box(self):
+            return {"x": 10, "y": 20, "width": 100, "height": 80}
+
+    controller = SafeModeController(
+        enabled=True,
+        sleep_fn=lambda _seconds: None,
+        rng=FakeRandom(),
+        mouse_backend=FakeBackend(),
+    )
+
+    assert controller.click_locator_with_mouse(object(), FakeLocator()) is True
+    assert moves == [(61.5, 60.0, 7)]
+    assert clicks == [(61.5, 60.0, 310)]
 
 
 def test_safe_mode_controller_reorients_on_search_page():

@@ -7,13 +7,14 @@ import pickle
 import random
 import re
 import shutil
+import string
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List, Protocol
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, unquote, urljoin, urlparse
 
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
 from playwright_stealth import Stealth
@@ -85,18 +86,105 @@ LOGIN_DIALOG_CLOSE_SELECTORS = (
 )
 SUPPORTED_INTERACTION_MODES = ("playwright", "os-mouse")
 SUPPORTED_BROWSER_MODES = ("local", "bright-data")
+SUPPORTED_ROTATION_MODES = ("none", "session")
 BRIGHT_DATA_BROWSER_API_ENDPOINT_ENVS = (
     "BRIGHT_DATA_BROWSER_API_ENDPOINT",
     "BRIGHT_DATA_BROWSER_API_URL",
 )
 BRIGHT_DATA_BROWSER_API_AUTH_ENV = "BRIGHT_DATA_BROWSER_API_AUTH"
 BRIGHT_DATA_BROWSER_API_HOST = "brd.superproxy.io:9222"
+ROTATABLE_HTTP_STATUSES = {403, 429}
+USER_AGENT_POOL = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+)
+ACCEPT_LANGUAGE_POOL = (
+    "zh-CN,zh;q=0.9,en;q=0.8",
+    "zh-CN,zh;q=0.9",
+    "zh-CN,zh-Hans;q=0.9,en-US;q=0.8,en;q=0.7",
+)
+
+
+class ProxyRotationRequired(RiskControlTriggered):
+    pass
+
+
+def generate_browser_session_id(length: int = 10) -> str:
+    alphabet = string.ascii_lowercase + string.digits
+    return "".join(random.choice(alphabet) for _ in range(length))
+
+
+def build_random_headers(
+    *,
+    rng: random.Random | None = None,
+    identity: str | None = None,
+) -> dict[str, str]:
+    if identity is not None:
+        digest = hashlib.sha256(identity.encode("utf-8")).digest()
+        user_agent = USER_AGENT_POOL[
+            int.from_bytes(digest[:4], byteorder="big") % len(USER_AGENT_POOL)
+        ]
+        accept_language = ACCEPT_LANGUAGE_POOL[
+            int.from_bytes(digest[4:8], byteorder="big") % len(ACCEPT_LANGUAGE_POOL)
+        ]
+    else:
+        chooser = rng or random
+        user_agent = chooser.choice(USER_AGENT_POOL)
+        accept_language = chooser.choice(ACCEPT_LANGUAGE_POOL)
+    chrome_major = re.search(r"Chrome/(\d+)", user_agent)
+    major = chrome_major.group(1) if chrome_major else "124"
+    platform = '"macOS"' if "Macintosh" in user_agent else '"Windows"'
+    return {
+        "User-Agent": user_agent,
+        "Accept-Language": accept_language,
+        "Sec-CH-UA": f'"Chromium";v="{major}", "Google Chrome";v="{major}", "Not-A.Brand";v="99"',
+        "Sec-CH-UA-Mobile": "?0",
+        "Sec-CH-UA-Platform": platform,
+    }
+
+
+def build_header_identity(
+    *,
+    browser_mode: str,
+    browser_session_id: str,
+    proxy_url: str,
+) -> str:
+    if proxy_url:
+        return f"proxy:{proxy_url}"
+    if browser_mode == "bright-data":
+        return f"bright-data:{browser_session_id}"
+    return "local-direct"
+
+
+def build_playwright_proxy(proxy_url: str) -> dict[str, str]:
+    value = proxy_url.strip()
+    if not value:
+        raise ValueError("proxy URL must not be empty")
+    if "://" not in value:
+        value = f"http://{value}"
+    parsed = urlparse(value)
+    if not parsed.scheme or not parsed.hostname:
+        raise ValueError("proxy URL must include host, for example http://host:port")
+    server = f"{parsed.scheme}://{parsed.hostname}"
+    if parsed.port is not None:
+        server = f"{server}:{parsed.port}"
+    proxy = {"server": server}
+    if parsed.username:
+        proxy["username"] = unquote(parsed.username)
+    if parsed.password:
+        proxy["password"] = unquote(parsed.password)
+    return proxy
 
 
 def build_bright_data_browser_api_endpoint(
     *,
     endpoint: str | None = None,
     auth: str | None = None,
+    session_id: str | None = None,
     environ: dict[str, str] | None = None,
 ) -> str:
     env = os.environ if environ is None else environ
@@ -109,7 +197,7 @@ def build_bright_data_browser_api_endpoint(
     if resolved_endpoint:
         if not resolved_endpoint.startswith("wss://"):
             raise ValueError("Bright Data Browser API endpoint must start with wss://")
-        return resolved_endpoint
+        return resolved_endpoint.replace("{session}", session_id or "")
 
     resolved_auth = (auth or env.get(BRIGHT_DATA_BROWSER_API_AUTH_ENV, "")).strip()
     if not resolved_auth:
@@ -122,6 +210,8 @@ def build_bright_data_browser_api_endpoint(
         )
     if ":" not in resolved_auth:
         raise ValueError("Bright Data Browser API auth must be formatted as USER:PASS")
+    if session_id:
+        resolved_auth = resolved_auth.replace("{session}", session_id)
     username, password = resolved_auth.split(":", 1)
     return (
         f"wss://{quote(username, safe='')}:{quote(password, safe='')}"
@@ -496,7 +586,7 @@ class SafeModeController:
                     page,
                     x,
                     y,
-                    delay_ms=round(self.rng.uniform(40, 140)),
+                    delay_ms=round(self.rng.uniform(200, 420)),
                 ):
                     return True
         except Exception:
@@ -523,7 +613,7 @@ class SafeModeController:
                 page,
                 x,
                 y,
-                delay_ms=round(self.rng.uniform(40, 140)),
+                delay_ms=round(self.rng.uniform(200, 420)),
             )
         except Exception:
             if self.mouse_backend.drives_system_cursor:
@@ -599,12 +689,28 @@ class BrowserSession:
         browser_mode: str = "local",
         browser_endpoint: str | None = None,
         browser_auth: str | None = None,
+        rotation_mode: str = "none",
+        browser_session_id: str | None = None,
+        randomize_headers: bool = True,
+        proxy_url: str | None = None,
     ):
         self.storage_state = str(storage_state) if storage_state else ""
         self.headless = headless
         self.browser_mode = browser_mode
         self.browser_endpoint = browser_endpoint
         self.browser_auth = browser_auth
+        self.rotation_mode = rotation_mode
+        self.browser_session_id = browser_session_id or generate_browser_session_id()
+        self.randomize_headers = randomize_headers
+        self.proxy_url = proxy_url.strip() if proxy_url else ""
+        header_identity = build_header_identity(
+            browser_mode=self.browser_mode,
+            browser_session_id=self.browser_session_id,
+            proxy_url=self.proxy_url,
+        )
+        self.extra_http_headers = (
+            build_random_headers(identity=header_identity) if randomize_headers else {}
+        )
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
@@ -619,16 +725,24 @@ class BrowserSession:
             raise ValueError(
                 f"browser_mode must be one of: {', '.join(SUPPORTED_BROWSER_MODES)}"
             )
+        if self.rotation_mode not in SUPPORTED_ROTATION_MODES:
+            raise ValueError(
+                f"rotation_mode must be one of: {', '.join(SUPPORTED_ROTATION_MODES)}"
+            )
         self._playwright = sync_playwright().start()
         if self.browser_mode == "bright-data":
             endpoint = build_bright_data_browser_api_endpoint(
                 endpoint=self.browser_endpoint,
                 auth=self.browser_auth,
+                session_id=self.browser_session_id,
             )
             self._browser = self._playwright.chromium.connect_over_cdp(endpoint)
             self._context = self._new_remote_context(storage_state_path)
         else:
-            self._browser = self._playwright.chromium.launch(headless=self.headless)
+            launch_kwargs = {"headless": self.headless}
+            if self.proxy_url:
+                launch_kwargs["proxy"] = build_playwright_proxy(self.proxy_url)
+            self._browser = self._playwright.chromium.launch(**launch_kwargs)
             fp = (
                 _get_or_create_fingerprint(storage_state_path)
                 if storage_state_path is not None
@@ -637,6 +751,8 @@ class BrowserSession:
             context_kwargs = {"fingerprint": fp}
             if storage_state_path is not None:
                 context_kwargs["storage_state"] = str(storage_state_path)
+            if self.extra_http_headers:
+                context_kwargs["extra_http_headers"] = self.extra_http_headers
             self._context = NewContext(self._browser, **context_kwargs)
         return self
 
@@ -656,9 +772,13 @@ class BrowserSession:
         if self._browser is None:
             raise RuntimeError("browser session is not started")
         try:
+            context_kwargs = {}
+            if self.extra_http_headers:
+                context_kwargs["extra_http_headers"] = self.extra_http_headers
             if storage_state_path is None:
-                return self._browser.new_context()
-            return self._browser.new_context(storage_state=str(storage_state_path))
+                return self._browser.new_context(**context_kwargs)
+            context_kwargs["storage_state"] = str(storage_state_path)
+            return self._browser.new_context(**context_kwargs)
         except Exception:
             if not self._browser.contexts:
                 raise
@@ -772,6 +892,8 @@ class PlaywrightCrawlerClient:
         page = self._get_page()
         response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
         if response is not None and response.status >= 400:
+            if response.status in ROTATABLE_HTTP_STATUSES:
+                raise ProxyRotationRequired(f"http_{response.status}")
             self.safe_mode_controller.on_risk_event(
                 reason=f"http_{response.status}"
             )
@@ -805,6 +927,8 @@ class PlaywrightCrawlerClient:
         page = self._get_page()
         response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
         if response is not None and response.status >= 400:
+            if response.status in ROTATABLE_HTTP_STATUSES:
+                raise ProxyRotationRequired(f"http_{response.status}")
             self.safe_mode_controller.on_risk_event(
                 reason=f"http_{response.status}"
             )
@@ -821,6 +945,8 @@ class PlaywrightCrawlerClient:
         page = self._get_page()
         response = page.goto(self.base_url, wait_until="domcontentloaded", timeout=30000)
         if response is not None and response.status >= 400:
+            if response.status in ROTATABLE_HTTP_STATUSES:
+                raise ProxyRotationRequired(f"http_{response.status}")
             self.safe_mode_controller.on_risk_event(
                 reason=f"http_{response.status}"
             )

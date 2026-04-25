@@ -1,3 +1,4 @@
+action: crawl_homefeed
 workspace_path: .
 require_local_checkout: false
 storage_state:
@@ -9,6 +10,11 @@ homefeed_url: https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_
 browser_mode: local
 browser_endpoint:
 browser_auth:
+proxy:
+proxy_list:
+rotation_mode: none
+rotation_retries: 1
+randomize_headers: true
 sync_dependencies: false
 install_browser: false
 runner_command:

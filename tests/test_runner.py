@@ -1,7 +1,9 @@
+import red_crawler.runner as runner_module
 from red_crawler.runner import (
     CrawlConfig,
     HomefeedCrawlConfig,
     SearchCrawlConfig,
+    run_crawl_homefeed,
     run_crawl_homefeed_with_client,
     run_crawl_search_with_client,
     run_crawl_seed_with_client,
@@ -178,6 +180,75 @@ def test_run_crawl_homefeed_collects_profiles_from_feed_state():
 
     assert [account.account_id for account in result.accounts] == ["user-301"]
     assert result.contact_leads[0].normalized_value == "b@example.com"
+
+
+def test_run_crawl_homefeed_rotates_local_proxies_after_403(tmp_path, monkeypatch):
+    proxy_list = tmp_path / "proxies.txt"
+    proxy_list.write_text(
+        "http://proxy-one:8000\nhttp://proxy-two:8000\n",
+        encoding="utf-8",
+    )
+    seen_proxies = []
+    outcomes = iter(
+        [
+            runner_module.CrawlResult(
+                accounts=[],
+                contact_leads=[],
+                run_report=runner_module.RunReport(
+                    seed_url="homefeed:test",
+                    attempted_accounts=0,
+                    succeeded_accounts=0,
+                    failed_accounts=0,
+                    lead_counts={},
+                    aborted=True,
+                    abort_reason="http_403",
+                    errors=[{"source": "homefeed", "error": "http_403"}],
+                ),
+            ),
+            runner_module.CrawlResult(
+                accounts=[],
+                contact_leads=[],
+                run_report=runner_module.RunReport(
+                    seed_url="homefeed:test",
+                    attempted_accounts=0,
+                    succeeded_accounts=0,
+                    failed_accounts=0,
+                    lead_counts={},
+                    errors=[],
+                ),
+            ),
+        ]
+    )
+
+    class FakeBrowserSession:
+        def __init__(self, *_args, **kwargs):
+            seen_proxies.append(kwargs.get("proxy_url"))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+    monkeypatch.setattr(runner_module, "BrowserSession", FakeBrowserSession)
+    monkeypatch.setattr(runner_module, "_build_playwright_client", lambda _config, session: session)
+    monkeypatch.setattr(
+        runner_module,
+        "run_crawl_homefeed_with_client",
+        lambda _config, _client: next(outcomes),
+    )
+
+    result = run_crawl_homefeed(
+        HomefeedCrawlConfig(
+            output_dir="out",
+            rotation_mode="session",
+            rotation_retries=1,
+            proxy_list=str(proxy_list),
+        )
+    )
+
+    assert result.run_report.aborted is False
+    assert seen_proxies == ["http://proxy-one:8000", "http://proxy-two:8000"]
 
 
 def test_run_crawl_seed_filters_successful_accounts_by_gender():

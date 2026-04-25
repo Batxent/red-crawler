@@ -14,6 +14,7 @@ Use this skill when you need to operate the installed `red-crawler` CLI from an 
 Use `red-crawler-ops` for:
 
 - preparing a local working directory for `red-crawler`
+- crawling the default Xiaohongshu cosmetics homefeed
 - saving a login session into Playwright storage state
 - crawling a seed Xiaohongshu profile
 - running nightly collection against a workspace database
@@ -24,7 +25,23 @@ Use `red-crawler-ops` for:
 
 All crawling tasks must use the native `red-crawler` CLI commands:
 
-### 1. crawl-seed
+### 1. crawl-homefeed (default)
+
+Collect users from the Xiaohongshu cosmetics homefeed. This is the default crawl mode when `action` is omitted. It clicks card author links, not note links.
+
+```bash
+red-crawler crawl-homefeed \
+  --homefeed-url "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3" \
+  --max-accounts 20 \
+  --db-path "./data/red_crawler.db" \
+  --output-dir "./output"
+```
+
+For IP rotation in local browser mode, provide `proxy` or `proxy_list` and set `rotation_mode: session`. The wrapper passes these through to `red-crawler`; after `403` or `429`, the crawler starts a new browser session using the next proxy. Each proxy maps deterministically to one browser header set, so the same outbound IP keeps the same `User-Agent`.
+
+Bright Data Browser API mode does not use local proxy settings. Use `browser_mode: bright-data` plus `browser_auth` or `browser_endpoint`; if either value contains `{session}`, the crawler replaces it with a random session id for each browser session.
+
+### 2. crawl-seed
 
 Crawl a specific Xiaohongshu user profile and extract contact information.
 
@@ -55,18 +72,6 @@ red-crawler crawl-seed \
 - `accounts.csv`: Crawled account information
 - `contact_leads.csv`: Extracted contact information (emails, etc.)
 - `run_report.json`: Execution report
-
-### 2. crawl-homefeed
-
-Collect users from the Xiaohongshu cosmetics homefeed. This clicks card author links, not note links.
-
-```bash
-red-crawler crawl-homefeed \
-  --homefeed-url "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3" \
-  --max-accounts 20 \
-  --db-path "./data/red_crawler.db" \
-  --output-dir "./output"
-```
 
 ### 3. login
 
@@ -123,7 +128,7 @@ red-crawler collect-nightly \
 - `--startup-jitter-minutes`: Startup jitter
 - `--slot-name`: Slot name for scheduling
 
-### 5. report-weekly
+### 6. report-weekly
 
 Export weekly reports from database.
 
@@ -145,7 +150,7 @@ red-crawler report-weekly \
 - `weekly-growth-report.json`
 - `contactable_creators.csv`
 
-### 6. list-contactable
+### 7. list-contactable
 
 List contactable creators from database.
 
@@ -168,7 +173,7 @@ red-crawler list-contactable \
 - `--limit`: Result limit (default: 20)
 - `--format`: Output format - table or csv (default: table)
 
-### 7. open
+### 8. open
 
 Open Xiaohongshu in browser with saved session.
 
@@ -179,9 +184,9 @@ red-crawler open --storage-state "./state.json"
 ## Supported Actions
 
 - `bootstrap`
-- `login`
+- `crawl_homefeed` (default when omitted)
 - `crawl_seed`
-- `crawl_homefeed`
+- `login`
 - `collect_nightly`
 - `report_weekly`
 - `list_contactable`
@@ -189,6 +194,7 @@ red-crawler open --storage-state "./state.json"
 ## Example Prompts
 
 - "帮我准备当前小红书爬虫项目的本地环境" (Automatically maps to `bootstrap` for an existing workspace)
+- "开始爬小红书彩妆博主" / "帮我抓取一批小红书博主" (Defaults to `crawl_homefeed`)
 - "我需要登录爬虫" / "我要登录小红书" (Automatically maps to `login` to fetch/refresh the Playwright session state)
 - "开始执行每日夜间数据采集" / "运行自动收集任务" (Automatically maps to `collect_nightly` to continue crawling based on the database queue)
 - "帮我生成一份本周的爬虫数据周报" (Automatically maps to `report_weekly` pointing to the workspace's DB)
@@ -312,6 +318,14 @@ Action-specific fields include:
 - `min_relevance_score`
 - `limit`
 - `format`
+- `browser_mode`
+- `browser_endpoint`
+- `browser_auth`
+- `proxy`
+- `proxy_list`
+- `rotation_mode` (`none`/`session`)
+- `rotation_retries`
+- `randomize_headers`
 
 ## Output Shape
 

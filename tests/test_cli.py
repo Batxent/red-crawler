@@ -387,6 +387,11 @@ def test_cli_crawl_search_passes_bright_data_browser_config(tmp_path, monkeypatc
         captured["browser_mode"] = config.browser_mode
         captured["browser_endpoint"] = config.browser_endpoint
         captured["browser_auth"] = config.browser_auth
+        captured["rotation_mode"] = config.rotation_mode
+        captured["rotation_retries"] = config.rotation_retries
+        captured["proxy"] = config.proxy
+        captured["proxy_list"] = config.proxy_list
+        captured["randomize_headers"] = config.randomize_headers
         return CrawlResult(
             accounts=[],
             contact_leads=[],
@@ -423,6 +428,15 @@ def test_cli_crawl_search_passes_bright_data_browser_config(tmp_path, monkeypatc
             "user:pass",
             "--browser-endpoint",
             "wss://user:pass@brd.superproxy.io:9222",
+            "--rotation-mode",
+            "session",
+            "--rotation-retries",
+            "2",
+            "--proxy",
+            "http://proxy-one:8000",
+            "--proxy-list",
+            str(tmp_path / "proxies.txt"),
+            "--no-randomize-headers",
             "--output-dir",
             str(tmp_path),
         ]
@@ -433,6 +447,11 @@ def test_cli_crawl_search_passes_bright_data_browser_config(tmp_path, monkeypatc
         "browser_mode": "bright-data",
         "browser_endpoint": "wss://user:pass@brd.superproxy.io:9222",
         "browser_auth": "user:pass",
+        "rotation_mode": "session",
+        "rotation_retries": 2,
+        "proxy": "http://proxy-one:8000",
+        "proxy_list": str(tmp_path / "proxies.txt"),
+        "randomize_headers": False,
     }
 
 

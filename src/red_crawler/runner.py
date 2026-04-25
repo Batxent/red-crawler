@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from collections import Counter, deque
 from dataclasses import dataclass
-from typing import Any, Deque, Dict, Optional, Protocol, Tuple
+from pathlib import Path
+from typing import Any, Callable, Deque, Dict, Optional, Protocol, Tuple
 
 from red_crawler.crawl.profile import build_failed_account_record, parse_profile_html
 from red_crawler.crawl.similar import (
@@ -48,6 +49,11 @@ class CrawlConfig:
     browser_mode: str = "local"
     browser_endpoint: str | None = None
     browser_auth: str | None = None
+    rotation_mode: str = "none"
+    rotation_retries: int = 1
+    randomize_headers: bool = True
+    proxy: str | None = None
+    proxy_list: str | None = None
     cache_dir: str | None = None
     cache_ttl_days: int = 7
     gender_filter: str | None = None
@@ -68,6 +74,11 @@ class SearchCrawlConfig:
     browser_mode: str = "local"
     browser_endpoint: str | None = None
     browser_auth: str | None = None
+    rotation_mode: str = "none"
+    rotation_retries: int = 1
+    randomize_headers: bool = True
+    proxy: str | None = None
+    proxy_list: str | None = None
     cache_dir: str | None = None
     cache_ttl_days: int = 7
     gender_filter: str | None = None
@@ -88,6 +99,11 @@ class HomefeedCrawlConfig:
     browser_mode: str = "local"
     browser_endpoint: str | None = None
     browser_auth: str | None = None
+    rotation_mode: str = "none"
+    rotation_retries: int = 1
+    randomize_headers: bool = True
+    proxy: str | None = None
+    proxy_list: str | None = None
     cache_dir: str | None = None
     cache_ttl_days: int = 7
     gender_filter: str | None = None
@@ -131,56 +147,109 @@ def _matches_gender_filter(account: AccountRecord, gender_filter: str | None) ->
 
 
 def run_crawl_seed(config: CrawlConfig) -> CrawlResult:
-    with BrowserSession(
-        config.storage_state,
-        browser_mode=config.browser_mode,
-        browser_endpoint=config.browser_endpoint,
-        browser_auth=config.browser_auth,
-    ) as session:
-        client = PlaywrightCrawlerClient(
-            session,
-            safe_mode=config.safe_mode,
-            interaction_mode=config.interaction_mode,
-            cache_dir=config.cache_dir,
-            cache_ttl_days=config.cache_ttl_days,
-        )
-        return run_crawl_seed_with_client(config, client)
+    return _run_with_rotating_browser_session(
+        config,
+        lambda session: run_crawl_seed_with_client(
+            config,
+            _build_playwright_client(config, session),
+        ),
+    )
+
+
+def _build_playwright_client(
+    config: CrawlConfig | SearchCrawlConfig | HomefeedCrawlConfig,
+    session: BrowserSession,
+) -> PlaywrightCrawlerClient:
+    kwargs: dict[str, object] = {
+        "safe_mode": config.safe_mode,
+        "interaction_mode": config.interaction_mode,
+        "cache_dir": config.cache_dir,
+        "cache_ttl_days": config.cache_ttl_days,
+    }
+    if isinstance(config, (SearchCrawlConfig, HomefeedCrawlConfig)):
+        kwargs["search_scroll_rounds"] = config.search_scroll_rounds
+    return PlaywrightCrawlerClient(session, **kwargs)
+
+
+def _run_with_rotating_browser_session(
+    config: CrawlConfig | SearchCrawlConfig | HomefeedCrawlConfig,
+    run_fn: Callable[[BrowserSession], CrawlResult],
+) -> CrawlResult:
+    proxies = _load_proxy_pool(config)
+    attempts = 1
+    if config.rotation_mode == "session":
+        attempts += max(config.rotation_retries, 0)
+    last_result: CrawlResult | None = None
+    for attempt in range(attempts):
+        proxy_url = proxies[attempt % len(proxies)] if proxies else None
+        with BrowserSession(
+            config.storage_state,
+            browser_mode=config.browser_mode,
+            browser_endpoint=config.browser_endpoint,
+            browser_auth=config.browser_auth,
+            rotation_mode=config.rotation_mode,
+            randomize_headers=config.randomize_headers,
+            proxy_url=proxy_url,
+        ) as session:
+            result = run_fn(session)
+        last_result = result
+        if not _should_retry_with_new_session(result):
+            return result
+        if attempt >= attempts - 1:
+            return result
+    if last_result is None:
+        raise RuntimeError("crawl did not run")
+    return last_result
+
+
+def _load_proxy_pool(config: CrawlConfig | SearchCrawlConfig | HomefeedCrawlConfig) -> list[str]:
+    proxies: list[str] = []
+    if config.proxy:
+        proxies.append(config.proxy.strip())
+    if config.proxy_list:
+        proxy_list_path = Path(config.proxy_list)
+        for line in proxy_list_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            proxies.append(stripped)
+    seen = set()
+    deduped = []
+    for proxy in proxies:
+        if proxy and proxy not in seen:
+            seen.add(proxy)
+            deduped.append(proxy)
+    return deduped
+
+
+def _should_retry_with_new_session(result: CrawlResult) -> bool:
+    retry_markers = {"http_403", "http_429"}
+    if result.run_report.abort_reason in retry_markers:
+        return True
+    for error in result.run_report.errors:
+        if str(error.get("error", "")) in retry_markers:
+            return True
+    return False
 
 
 def run_crawl_search(config: SearchCrawlConfig) -> CrawlResult:
-    with BrowserSession(
-        config.storage_state,
-        browser_mode=config.browser_mode,
-        browser_endpoint=config.browser_endpoint,
-        browser_auth=config.browser_auth,
-    ) as session:
-        client = PlaywrightCrawlerClient(
-            session,
-            safe_mode=config.safe_mode,
-            interaction_mode=config.interaction_mode,
-            search_scroll_rounds=config.search_scroll_rounds,
-            cache_dir=config.cache_dir,
-            cache_ttl_days=config.cache_ttl_days,
-        )
-        return run_crawl_search_with_client(config, client)
+    return _run_with_rotating_browser_session(
+        config,
+        lambda session: run_crawl_search_with_client(
+            config,
+            _build_playwright_client(config, session),
+        ),
+    )
 
 
 def run_crawl_homefeed(config: HomefeedCrawlConfig) -> CrawlResult:
-    with BrowserSession(
-        config.storage_state,
-        browser_mode=config.browser_mode,
-        browser_endpoint=config.browser_endpoint,
-        browser_auth=config.browser_auth,
-    ) as session:
-        client = PlaywrightCrawlerClient(
-            session,
-            safe_mode=config.safe_mode,
-            interaction_mode=config.interaction_mode,
-            search_scroll_rounds=config.search_scroll_rounds,
-            cache_dir=config.cache_dir,
-            cache_ttl_days=config.cache_ttl_days,
-        )
-        return run_crawl_homefeed_with_client(config, client)
+    return _run_with_rotating_browser_session(
+        config,
+        lambda session: run_crawl_homefeed_with_client(
+            config,
+            _build_playwright_client(config, session),
+        ),
+    )
 
 
 def run_crawl_homefeed_with_client(

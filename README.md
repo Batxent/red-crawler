@@ -77,6 +77,30 @@ red-crawler crawl-seed \
 - exports `accounts.csv`, `contact_leads.csv`, `run_report.json`
 - upserts the same result into SQLite
 
+### Browser IP rotation
+
+Bright Data Browser API mode rotates by opening a fresh browser session on retry. If your Bright Data username, password, or endpoint contains `{session}`, red-crawler replaces it with a random session id for each browser session:
+
+```bash
+red-crawler crawl-homefeed \
+  --browser-mode bright-data \
+  --browser-auth "brd-customer-xxx-zone-xxx-session-{session}:PASSWORD" \
+  --rotation-mode session \
+  --rotation-retries 2
+```
+
+In local browser mode, red-crawler cannot rotate the machine's real IP by itself. Provide one proxy with `--proxy` or a newline-delimited proxy pool with `--proxy-list`; session rotation will launch a new Chromium session with the next proxy after `403` or `429`.
+
+```bash
+red-crawler crawl-homefeed \
+  --proxy-list "./proxies.txt" \
+  --rotation-mode session \
+  --rotation-retries 3 \
+  --output-dir "./output"
+```
+
+Proxy entries can be `host:port`, `http://user:pass@host:port`, or `socks5://host:port`. By default, each proxy maps deterministically to one `User-Agent`, `Accept-Language`, and `Sec-CH-UA` header set, so the same outbound IP does not appear with a different browser fingerprint on a later retry. Direct local mode uses one stable local fingerprint. Use `--no-randomize-headers` only for debugging.
+
 Run a manual crawl for one explicit search term without a `seed_url`:
 
 ```bash
