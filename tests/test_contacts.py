@@ -131,6 +131,16 @@ def test_extract_contact_leads_recovers_spelled_out_email_domains():
     assert "team@outlook.com" in emails
 
 
+def test_extract_contact_leads_does_not_mark_email_remark_as_business_note():
+    bio = "大家理性种草哦 合作邮箱：1449788295@qq.com（合作请备注）"
+
+    leads = extract_contact_leads(account_id="user-024", bio_text=bio)
+
+    assert [(lead.lead_type, lead.normalized_value) for lead in leads] == [
+        ("email", "1449788295@qq.com")
+    ]
+
+
 def test_extract_contact_leads_normalizes_stylized_unicode_email():
     bio = "江西米粉大王的日常 🤍𝐥𝐢𝐭𝐭𝐥𝐞𝐧𝐢𝐧𝐢𝐮@𝐆𝐦𝐚𝐢𝐥.𝐜𝐨𝐦"
 
@@ -192,6 +202,59 @@ def test_extract_contact_leads_recovers_business_emoji_contact_id():
     assert by_type["wechat"].normalized_value == "keikanata"
     assert by_type["wechat"].raw_snippet == "🈴keikanata"
     assert by_type["wechat"].confidence < 0.9
+
+
+def test_extract_contact_leads_recovers_contact_emoji_id():
+    bio = "⋆˚𝜗𝜚˚⋆ 💌𝐩𝐮𝐫𝐫𝐩1𝐞𝐫𝐚𝐢𝐧"
+
+    leads = extract_contact_leads(account_id="user-019", bio_text=bio)
+    by_type = {lead.lead_type: lead for lead in leads}
+
+    assert by_type["wechat"].normalized_value == "purrp1erain"
+    assert by_type["wechat"].raw_snippet == "💌purrp1erain"
+    assert by_type["wechat"].confidence < 0.9
+
+
+def test_extract_contact_leads_recovers_annotated_self_contact_id():
+    bio = "🎮banana980421（本人）"
+
+    leads = extract_contact_leads(account_id="user-020", bio_text=bio)
+    by_type = {lead.lead_type: lead for lead in leads}
+
+    assert by_type["wechat"].normalized_value == "banana980421"
+    assert by_type["wechat"].raw_snippet == "banana980421(本人)"
+    assert by_type["wechat"].confidence < 0.9
+
+
+def test_extract_contact_leads_recovers_directional_contact_id():
+    bio = (
+        "🔸抽象概念线条纹身风格 🔹禁止盗图禁止商用禁止自拿 "
+        "✨ TLIANGGGG ⬅️ 纹身作品：@十雨TATTOO-亮亮 摄影作品：@二号玩家"
+    )
+
+    leads = extract_contact_leads(account_id="user-021", bio_text=bio)
+    by_type = {lead.lead_type: lead for lead in leads}
+
+    assert by_type["wechat"].normalized_value == "tliangggg"
+    assert by_type["wechat"].raw_snippet == "✨ TLIANGGGG ⬅"
+    assert by_type["wechat"].confidence < 0.9
+
+
+def test_extract_contact_leads_recovers_generic_ascii_contact_id():
+    leads = extract_contact_leads(account_id="user-022", bio_text="日常碎片 tliangggg")
+    by_type = {lead.lead_type: lead for lead in leads}
+
+    assert by_type["wechat"].normalized_value == "tliangggg"
+    assert by_type["wechat"].raw_snippet == "tliangggg"
+    assert by_type["wechat"].confidence < 0.7
+
+
+def test_extract_contact_leads_does_not_extract_embedded_mention_ascii_word():
+    bio = "纹身作品：@十雨TATTOO-亮亮 摄影作品：@二号玩家"
+
+    leads = extract_contact_leads(account_id="user-023", bio_text=bio)
+
+    assert [lead for lead in leads if lead.lead_type == "wechat"] == []
 
 
 def test_extract_contact_leads_keeps_soft_wechat_hints():

@@ -27,6 +27,18 @@ REMARK_CONTACT_ID_RE = re.compile(
 BUSINESS_CONTACT_ID_RE = re.compile(
     r"(?:🈴|(?<![\u4e00-\u9fff])合|合作|商务)\s*[:：]?\s*([A-Za-z][A-Za-z0-9_-]{5,19})"
 )
+CONTACT_EMOJI_ID_RE = re.compile(
+    r"(?:💌|📩|📨|📧|✉️?|💬|📮)\s*([A-Za-z][A-Za-z0-9_-]{5,19})"
+)
+ANNOTATED_CONTACT_ID_RE = re.compile(
+    r"(?<![A-Za-z0-9_-])([A-Za-z][A-Za-z0-9_-]{5,19}\s*[（(][^）)]*(?:本人|小号|大号|同名|私信|联系)[^）)]*[）)])"
+)
+DIRECTIONAL_CONTACT_ID_RE = re.compile(
+    r"(?<![@A-Za-z0-9_-])(?:[✨⭐🌟💫🔸🔹]\s*)?([A-Za-z][A-Za-z0-9_-]{5,19})\s*(?:[⬅←↩↙]|<-|<=|(?:账号|主页|作品|纹身作品|摄影作品|联系|私信)\s*[:：])"
+)
+GENERIC_CONTACT_ID_RE = re.compile(
+    r"(?<![@.A-Za-z0-9_\-\u4e00-\u9fff])([A-Za-z][A-Za-z0-9_-]{4,18}[A-Za-z0-9])(?![@.A-Za-z0-9_\-\u4e00-\u9fff])"
+)
 QQ_RE = re.compile(r"(?:QQ|qq|扣扣)\s*[:：]?\s*([1-9]\d{4,11})")
 BUSINESS_NOTE_RE = re.compile(r"([^，。；;\n]*(?:备注|品牌名)[^，。；;\n]*)")
 MANAGER_RE = re.compile(r"([^，。；;\n]*(?:经纪人|商务对接|商务联系)[^，。；;\n]*)")
@@ -97,6 +109,19 @@ def _normalize_email_text(text: str) -> str:
         normalized,
     )
     return normalized
+
+
+def _contains_email_contact(text: str) -> bool:
+    email_text = _normalize_email_text(text)
+    return any(
+        pattern.search(email_text)
+        for pattern in (
+            EMAIL_RE,
+            OBFUSCATED_EMAIL_RE,
+            OBFUSCATED_QQ_EMAIL_RE,
+            QQ_MAIL_LABEL_RE,
+        )
+    )
 
 
 def _dedupe(leads: Iterable[ContactLead]) -> List[ContactLead]:
@@ -236,6 +261,68 @@ def extract_contact_leads(account_id: str, bio_text: str) -> List[ContactLead]:
             )
         )
 
+    contact_text = _normalize_email_text(text)
+    for match in CONTACT_EMOJI_ID_RE.finditer(contact_text):
+        value = match.group(1).lower()
+        leads.append(
+            ContactLead(
+                account_id=account_id,
+                lead_type="wechat",
+                normalized_value=value,
+                raw_snippet=match.group(0).strip(" ，。;；"),
+                confidence=0.72,
+                extractor_name="contact_emoji_id_regex",
+                source_field="bio",
+                dedupe_key=f"wechat:{value}",
+            )
+        )
+
+    for match in ANNOTATED_CONTACT_ID_RE.finditer(contact_text):
+        raw_snippet = match.group(1).strip(" ，。;；")
+        value = re.split(r"\s*[（(]", raw_snippet, maxsplit=1)[0].lower()
+        leads.append(
+            ContactLead(
+                account_id=account_id,
+                lead_type="wechat",
+                normalized_value=value,
+                raw_snippet=raw_snippet,
+                confidence=0.7,
+                extractor_name="annotated_contact_id_regex",
+                source_field="bio",
+                dedupe_key=f"wechat:{value}",
+            )
+        )
+
+    for match in DIRECTIONAL_CONTACT_ID_RE.finditer(contact_text):
+        value = match.group(1).lower()
+        leads.append(
+            ContactLead(
+                account_id=account_id,
+                lead_type="wechat",
+                normalized_value=value,
+                raw_snippet=match.group(0).strip(" ，。;；"),
+                confidence=0.68,
+                extractor_name="directional_contact_id_regex",
+                source_field="bio",
+                dedupe_key=f"wechat:{value}",
+            )
+        )
+
+    for match in GENERIC_CONTACT_ID_RE.finditer(contact_text):
+        value = match.group(1).lower()
+        leads.append(
+            ContactLead(
+                account_id=account_id,
+                lead_type="wechat",
+                normalized_value=value,
+                raw_snippet=match.group(1),
+                confidence=0.62,
+                extractor_name="generic_contact_id_regex",
+                source_field="bio",
+                dedupe_key=f"wechat:{value}",
+            )
+        )
+
     for match in QQ_RE.finditer(text):
         value = match.group(1)
         leads.append(
@@ -253,6 +340,8 @@ def extract_contact_leads(account_id: str, bio_text: str) -> List[ContactLead]:
 
     for match in BUSINESS_NOTE_RE.finditer(text):
         snippet = match.group(1).strip(" ，。;；")
+        if _contains_email_contact(snippet):
+            continue
         leads.append(
             ContactLead(
                 account_id=account_id,
