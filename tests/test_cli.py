@@ -98,6 +98,8 @@ def test_cli_crawl_seed_exports_expected_files(tmp_path, monkeypatch):
             str(tmp_path / "cache"),
             "--gender-filter",
             "女",
+            "--db-path",
+            str(tmp_path / "red-crawler.db"),
             "--output-dir",
             str(tmp_path),
         ]
@@ -462,6 +464,7 @@ def test_cli_crawl_homefeed_does_not_require_storage_state(tmp_path, monkeypatch
         captured["homefeed_url"] = config.homefeed_url
         captured["storage_state"] = config.storage_state
         captured["max_accounts"] = config.max_accounts
+        captured["search_scroll_rounds"] = config.search_scroll_rounds
         captured["existing_account_ids"] = config.existing_account_ids
         return CrawlResult(
             accounts=[],
@@ -509,10 +512,64 @@ def test_cli_crawl_homefeed_does_not_require_storage_state(tmp_path, monkeypatch
     )
     assert captured["storage_state"] == ""
     assert captured["max_accounts"] == 8
+    assert captured["search_scroll_rounds"] == 2
     assert captured["existing_account_ids"] == ("user-001", "user-002")
     assert captured["db_path"] == tmp_path / "red-crawler.db"
     assert captured["run_type"] == "crawl_homefeed"
     assert captured["safe_mode"] is True
+
+
+def test_cli_crawl_homefeed_backfills_scroll_rounds_for_existing_accounts(
+    tmp_path, monkeypatch
+):
+    captured = {}
+
+    def fake_run_crawl_homefeed(config):
+        captured["search_scroll_rounds"] = config.search_scroll_rounds
+        captured["existing_account_ids"] = config.existing_account_ids
+        return CrawlResult(
+            accounts=[],
+            contact_leads=[],
+            run_report=RunReport(
+                seed_url=f"homefeed:{config.homefeed_url}",
+                attempted_accounts=0,
+                succeeded_accounts=0,
+                failed_accounts=0,
+                lead_counts={},
+                errors=[],
+            ),
+        )
+
+    class FakeStore:
+        def __init__(self, _db_path):
+            pass
+
+        def list_creator_account_ids(self):
+            return {f"user-{index:03d}" for index in range(17)}
+
+        def record_crawl_result(self, result, run_type, safe_mode, started_at):
+            return 1
+
+    monkeypatch.setattr("red_crawler.cli.run_crawl_homefeed", fake_run_crawl_homefeed)
+    monkeypatch.setattr("red_crawler.cli.CrawlerStore", FakeStore)
+
+    exit_code = main(
+        [
+            "crawl-homefeed",
+            "--max-accounts",
+            "8",
+            "--search-scroll-rounds",
+            "2",
+            "--db-path",
+            str(tmp_path / "red-crawler.db"),
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["search_scroll_rounds"] == 6
+    assert len(captured["existing_account_ids"]) == 17
 
 
 def test_cli_collect_nightly_runs_worker(tmp_path, monkeypatch):

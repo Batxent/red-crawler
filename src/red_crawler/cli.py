@@ -44,6 +44,19 @@ def _default_login_session_path(save_state: str) -> Path:
     return Path(save_state).with_suffix(".login-session.json")
 
 
+def _effective_homefeed_scroll_rounds(
+    *,
+    requested_scroll_rounds: int,
+    max_accounts: int,
+    existing_account_count: int,
+) -> int:
+    requested = max(int(requested_scroll_rounds), 0)
+    if max_accounts <= 0 or existing_account_count <= 0:
+        return requested
+    backfill_multiplier = 1 + (existing_account_count // max_accounts)
+    return requested * min(backfill_multiplier, 5)
+
+
 def _add_browser_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--browser-mode",
@@ -395,12 +408,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "crawl-homefeed":
         output_dir = Path(args.output_dir)
         store = CrawlerStore(Path(args.db_path))
+        existing_account_ids = tuple(sorted(store.list_creator_account_ids()))
         config = HomefeedCrawlConfig(
             homefeed_url=args.homefeed_url,
             storage_state=args.storage_state,
             output_dir=str(output_dir),
             max_accounts=args.max_accounts,
-            search_scroll_rounds=args.search_scroll_rounds,
+            search_scroll_rounds=_effective_homefeed_scroll_rounds(
+                requested_scroll_rounds=args.search_scroll_rounds,
+                max_accounts=args.max_accounts,
+                existing_account_count=len(existing_account_ids),
+            ),
             min_followers=args.min_followers,
             min_relevance_score=args.min_relevance_score,
             creator_only=args.creator_only,
@@ -417,7 +435,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             cache_dir=args.cache_dir,
             cache_ttl_days=args.cache_ttl_days,
             gender_filter=args.gender_filter,
-            existing_account_ids=tuple(sorted(store.list_creator_account_ids())),
+            existing_account_ids=existing_account_ids,
         )
         result = run_crawl_homefeed(config)
         export_run(result, output_dir)
