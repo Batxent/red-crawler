@@ -42,6 +42,61 @@ def test_extract_contact_leads_recovers_obfuscated_qq_email():
     assert emails[0].dedupe_key == "email:919581887@qq.com"
 
 
+def test_extract_contact_leads_recovers_circled_digit_penguin_email():
+    bio = "生活碎片大放送！@iiikio 9⃝5⃝1⃝4⃝1⃝9⃝6⃝5⃝0⃝ 🐧.📧"
+
+    leads = extract_contact_leads(account_id="user-013", bio_text=bio)
+    emails = [lead for lead in leads if lead.lead_type == "email"]
+
+    assert len(emails) == 1
+    assert emails[0].normalized_value == "951419650@qq.com"
+    assert emails[0].raw_snippet == "951419650@qq.com"
+
+
+def test_extract_contact_leads_recovers_decorated_email_suffix():
+    bio = "🎀 𝒷𝒻𝓌𝒾𝓃𝒹𝟫𝟫@𝟣𝟤𝟨.𝒸💗𝓂"
+
+    leads = extract_contact_leads(account_id="user-014", bio_text=bio)
+    emails = [lead for lead in leads if lead.lead_type == "email"]
+
+    assert len(emails) == 1
+    assert emails[0].normalized_value == "bfwind99@126.com"
+    assert emails[0].raw_snippet == "bfwind99@126.com"
+
+
+def test_extract_contact_leads_recovers_heavily_decorated_qq_email():
+    bio = "💕 𝟝𝟞𝟜𝟙𝟚⓪⑤①⑧ 🌀 🐧🐧·c̆̈🔘m̆̈"
+
+    leads = extract_contact_leads(account_id="user-016", bio_text=bio)
+    emails = [lead for lead in leads if lead.lead_type == "email"]
+
+    assert len(emails) == 1
+    assert emails[0].normalized_value == "564120518@qq.com"
+    assert emails[0].raw_snippet == "564120518@qq.com"
+
+
+def test_extract_contact_leads_recovers_homoglyph_domain_email():
+    bio = "yay@sһᥙgᥱ.ᥴᥒ"
+
+    leads = extract_contact_leads(account_id="user-017", bio_text=bio)
+    emails = [lead for lead in leads if lead.lead_type == "email"]
+
+    assert len(emails) == 1
+    assert emails[0].normalized_value == "yay@shuge.cn"
+    assert emails[0].raw_snippet == "yay@shuge.cn"
+
+
+def test_extract_contact_leads_normalizes_broad_ascii_homoglyph_email():
+    bio = "аƅсԁеғɡһіјκⅼмոорԛгѕтυνԝхуᴢ@ехаmрⅼе.сո"
+
+    leads = extract_contact_leads(account_id="user-018", bio_text=bio)
+    emails = [lead for lead in leads if lead.lead_type == "email"]
+
+    assert len(emails) == 1
+    assert emails[0].normalized_value == "abcdefghijklmnopqrstuvwxyz@example.cn"
+    assert emails[0].raw_snippet == "abcdefghijklmnopqrstuvwxyz@example.cn"
+
+
 def test_extract_contact_leads_supports_wechat_aliases_and_qq_number():
     bio = "商务V: Lucky_mia88，薇：Lucky_mia88，扣扣：919581887"
 
@@ -76,6 +131,17 @@ def test_extract_contact_leads_recovers_spelled_out_email_domains():
     assert "team@outlook.com" in emails
 
 
+def test_extract_contact_leads_normalizes_stylized_unicode_email():
+    bio = "江西米粉大王的日常 🤍𝐥𝐢𝐭𝐭𝐥𝐞𝐧𝐢𝐧𝐢𝐮@𝐆𝐦𝐚𝐢𝐥.𝐜𝐨𝐦"
+
+    leads = extract_contact_leads(account_id="user-011", bio_text=bio)
+    emails = [lead for lead in leads if lead.lead_type == "email"]
+
+    assert len(emails) == 1
+    assert emails[0].normalized_value == "littleniniu@gmail.com"
+    assert emails[0].raw_snippet == "littleniniu@Gmail.com"
+
+
 def test_extract_contact_leads_keeps_redirected_account_hints():
     bio = "日常在@蕾大哥爱火锅，小号在@LuckyMiaDaily，工作联系见主页"
 
@@ -104,6 +170,28 @@ def test_extract_contact_leads_supports_more_wechat_alias_variants():
     wechats = [lead.normalized_value for lead in leads if lead.lead_type == "wechat"]
 
     assert wechats == ["lucky_mia88"]
+
+
+def test_extract_contact_leads_recovers_remark_contact_id():
+    bio = "爱出者爱返 福往者福来 Vlog @麦辣qq (不熟) UUMM1788 (备注📝)"
+
+    leads = extract_contact_leads(account_id="user-012", bio_text=bio)
+    by_type = {lead.lead_type: lead for lead in leads}
+
+    assert by_type["wechat"].normalized_value == "uumm1788"
+    assert by_type["wechat"].raw_snippet == "UUMM1788 (备注📝)"
+    assert by_type["wechat"].confidence < 0.9
+
+
+def test_extract_contact_leads_recovers_business_emoji_contact_id():
+    bio = "🈴keikanata"
+
+    leads = extract_contact_leads(account_id="user-015", bio_text=bio)
+    by_type = {lead.lead_type: lead for lead in leads}
+
+    assert by_type["wechat"].normalized_value == "keikanata"
+    assert by_type["wechat"].raw_snippet == "🈴keikanata"
+    assert by_type["wechat"].confidence < 0.9
 
 
 def test_extract_contact_leads_keeps_soft_wechat_hints():
