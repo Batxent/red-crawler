@@ -1,0 +1,37 @@
+src/red_crawler/cli.py
+  72a3627a3d7d8694 397,420
+tests/test_runner.py
+  72a3627a3d7d8694 185-225,275-279,299-361
+src/red_crawler/runner.py
+  72a3627a3d7d8694 4,29-31,113,239-253,265,272-281,294-298,314,318,320-322,325
+src/red_crawler/store/database.py
+  72a3627a3d7d8694 718-722
+tests/test_session.py
+  72a3627a3d7d8694 12,677-680,684-693,957-997
+tests/test_cli.py
+  72a3627a3d7d8694 465,483-485,512
+src/red_crawler/session.py
+  72a3627a3d7d8694 49-52,253-258,903-909,917,924,942-948,956,1013,1164-1165,1175-1177,1180-1209
+tests/test_store.py
+  72a3627a3d7d8694 89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "08f6bb03bd402dc2716648229b7d711608056fc2",
+  "prompts": {
+    "72a3627a3d7d8694": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dc317-a4b1-7a43-b7b9-addadc7dac3c",
+        "model": "gpt-5.5"
+      },
+      "human_author": "tommy",
+      "messages": [],
+      "total_additions": 288,
+      "total_deletions": 20,
+      "accepted_lines": 288,
+      "overriden_lines": 0
+    }
+  }
+}
