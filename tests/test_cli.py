@@ -462,6 +462,7 @@ def test_cli_crawl_homefeed_does_not_require_storage_state(tmp_path, monkeypatch
         captured["homefeed_url"] = config.homefeed_url
         captured["storage_state"] = config.storage_state
         captured["max_accounts"] = config.max_accounts
+        captured["existing_account_ids"] = config.existing_account_ids
         return CrawlResult(
             accounts=[],
             contact_leads=[],
@@ -478,6 +479,9 @@ def test_cli_crawl_homefeed_does_not_require_storage_state(tmp_path, monkeypatch
     class FakeStore:
         def __init__(self, db_path):
             captured["db_path"] = db_path
+
+        def list_creator_account_ids(self):
+            return {"user-001", "user-002"}
 
         def record_crawl_result(self, result, run_type, safe_mode, started_at):
             captured["run_type"] = run_type
@@ -505,6 +509,7 @@ def test_cli_crawl_homefeed_does_not_require_storage_state(tmp_path, monkeypatch
     )
     assert captured["storage_state"] == ""
     assert captured["max_accounts"] == 8
+    assert captured["existing_account_ids"] == ("user-001", "user-002")
     assert captured["db_path"] == tmp_path / "red-crawler.db"
     assert captured["run_type"] == "crawl_homefeed"
     assert captured["safe_mode"] is True

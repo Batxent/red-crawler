@@ -715,6 +715,11 @@ class CrawlerStore:
                 break
         return deduped
 
+    def list_creator_account_ids(self) -> set[str]:
+        with self.connect() as conn:
+            rows = conn.execute("select account_id from creator_accounts").fetchall()
+        return {str(row["account_id"]) for row in rows if row["account_id"]}
+
     def seed_default_search_terms(self, *, now: datetime | None = None) -> None:
         seed_terms = list(SEARCH_QUERY_GROUPS["beauty"])
         for _, query in TOPIC_QUERY_HINTS:

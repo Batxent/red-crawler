@@ -46,6 +46,10 @@ HIGH_RISK_PAGE_MARKERS = {
         "登录后查看",
         "请先登录",
         "扫码登录",
+        "Security Verification",
+        "Scan with logged-in",
+        "REDNote APP",
+        "QR code expires",
     ),
 }
 SEARCH_INPUT_SELECTORS = (
@@ -243,6 +247,12 @@ def classify_high_risk_page(body_text: str) -> str | None:
     for risk_type, markers in HIGH_RISK_PAGE_MARKERS.items():
         if any(marker in text for marker in markers):
             return risk_type
+    return None
+
+
+def classify_high_risk_url(url: str) -> str | None:
+    if "/website-login/captcha" in url:
+        return "login_required"
     return None
 
 
@@ -890,7 +900,13 @@ class PlaywrightCrawlerClient:
         if clicked_html is not None:
             return clicked_html
         page = self._get_page()
-        response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        try:
+            response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        except Exception as exc:
+            self._raise_if_high_risk_page(page, exc)
+            if not self._page_has_readable_body(page):
+                raise
+            response = None
         if response is not None and response.status >= 400:
             if response.status in ROTATABLE_HTTP_STATUSES:
                 raise ProxyRotationRequired(f"http_{response.status}")
@@ -898,16 +914,14 @@ class PlaywrightCrawlerClient:
                 reason=f"http_{response.status}"
             )
             raise RuntimeError(f"page request failed with status {response.status}")
+        self._raise_if_high_risk_page(page)
         try:
             page.wait_for_load_state("networkidle", timeout=5000)
         except Exception:
             pass
         self._dismiss_login_dialogs(page)
         body_text = page.locator("body").inner_text()
-        risk_type = self._classify_page_after_dialog_dismissal(page, body_text)
-        if risk_type is not None:
-            self.safe_mode_controller.on_risk_event(reason=risk_type)
-            raise RuntimeError(f"high risk page detected: {risk_type}")
+        self._raise_if_high_risk_page(page, body_text=body_text)
         if "未连接到服务器，刷新一下试试" in body_text:
             self.safe_mode_controller.on_risk_event(
                 reason="server_connection_error"
@@ -925,7 +939,13 @@ class PlaywrightCrawlerClient:
     def _load_search_result_htmls(self, url: str, scroll_rounds: int = 2) -> List[str]:
         self.safe_mode_controller.before_request()
         page = self._get_page()
-        response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        try:
+            response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        except Exception as exc:
+            self._raise_if_high_risk_page(page, exc)
+            if not self._page_has_readable_body(page):
+                raise
+            response = None
         if response is not None and response.status >= 400:
             if response.status in ROTATABLE_HTTP_STATUSES:
                 raise ProxyRotationRequired(f"http_{response.status}")
@@ -933,6 +953,7 @@ class PlaywrightCrawlerClient:
                 reason=f"http_{response.status}"
             )
             raise RuntimeError(f"page request failed with status {response.status}")
+        self._raise_if_high_risk_page(page)
         return self._capture_search_result_htmls(page, scroll_rounds=scroll_rounds)
 
     def _load_search_result_htmls_via_ui(
@@ -989,10 +1010,7 @@ class PlaywrightCrawlerClient:
                 pass
             self._dismiss_login_dialogs(page)
             body_text = page.locator("body").inner_text()
-            risk_type = self._classify_page_after_dialog_dismissal(page, body_text)
-            if risk_type is not None:
-                self.safe_mode_controller.on_risk_event(reason=risk_type)
-                raise RuntimeError(f"high risk page detected: {risk_type}")
+            self._raise_if_high_risk_page(page, body_text=body_text)
             html = page.content()
             if html not in html_snapshots:
                 html_snapshots.append(html)
@@ -1143,7 +1161,8 @@ class PlaywrightCrawlerClient:
         page: Page,
         body_text: str,
     ) -> str | None:
-        risk_type = classify_high_risk_page(body_text)
+        page_url = str(getattr(page, "url", ""))
+        risk_type = classify_high_risk_url(page_url) or classify_high_risk_page(body_text)
         if risk_type != "login_required":
             return risk_type
         if not self._dismiss_login_dialogs(page):
@@ -1153,8 +1172,41 @@ class PlaywrightCrawlerClient:
         except Exception:
             pass
         refreshed_text = page.locator("body").inner_text()
-        refreshed_risk_type = classify_high_risk_page(refreshed_text)
+        refreshed_risk_type = classify_high_risk_url(
+            page_url
+        ) or classify_high_risk_page(refreshed_text)
         return None if refreshed_risk_type == "login_required" else refreshed_risk_type
+
+    def _raise_if_high_risk_page(
+        self,
+        page: Page,
+        exc: Exception | None = None,
+        *,
+        body_text: str | None = None,
+    ) -> None:
+        risk_type = classify_high_risk_url(str(getattr(page, "url", "")))
+        if risk_type is None:
+            try:
+                text = (
+                    body_text
+                    if body_text is not None
+                    else page.locator("body").inner_text()
+                )
+            except Exception:
+                text = ""
+            risk_type = self._classify_page_after_dialog_dismissal(page, text)
+        if risk_type is None:
+            return
+        self.safe_mode_controller.on_risk_event(reason=risk_type)
+        if exc is not None:
+            raise RiskControlTriggered(risk_type) from exc
+        raise RiskControlTriggered(risk_type)
+
+    def _page_has_readable_body(self, page: Page) -> bool:
+        try:
+            return bool(page.locator("body").inner_text().strip())
+        except Exception:
+            return False
 
     def _dismiss_login_dialogs(self, page: Page) -> bool:
         dismissed = False

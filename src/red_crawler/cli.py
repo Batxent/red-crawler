@@ -394,6 +394,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "crawl-homefeed":
         output_dir = Path(args.output_dir)
+        store = CrawlerStore(Path(args.db_path))
         config = HomefeedCrawlConfig(
             homefeed_url=args.homefeed_url,
             storage_state=args.storage_state,
@@ -416,10 +417,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             cache_dir=args.cache_dir,
             cache_ttl_days=args.cache_ttl_days,
             gender_filter=args.gender_filter,
+            existing_account_ids=tuple(sorted(store.list_creator_account_ids())),
         )
         result = run_crawl_homefeed(config)
         export_run(result, output_dir)
-        store = CrawlerStore(Path(args.db_path))
         store.record_crawl_result(
             result,
             run_type="crawl_homefeed",

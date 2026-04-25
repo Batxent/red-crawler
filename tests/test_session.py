@@ -9,6 +9,7 @@ from red_crawler.session import (
     build_mouse_backend,
     apply_stealth,
     classify_high_risk_page,
+    classify_high_risk_url,
     OSMouseBackend,
     PlaywrightCrawlerClient,
     RiskControlTriggered,
@@ -673,7 +674,21 @@ def test_safe_mode_controller_triggers_circuit_breaker_after_repeated_risk_event
 def test_classify_high_risk_page_detects_verification_and_login_expiry():
     assert classify_high_risk_page("请完成安全验证后继续访问") == "verification"
     assert classify_high_risk_page("登录后查看更多内容") == "login_required"
+    assert (
+        classify_high_risk_page("Scan with logged-in REDNote APP for account security.")
+        == "login_required"
+    )
     assert classify_high_risk_page("正常的主页内容") is None
+
+
+def test_classify_high_risk_url_detects_website_login_captcha():
+    assert (
+        classify_high_risk_url(
+            "https://www.xiaohongshu.com/website-login/captcha?verifyType=124"
+        )
+        == "login_required"
+    )
+    assert classify_high_risk_url("https://www.xiaohongshu.com/explore") is None
 
 
 def test_playwright_crawler_client_dismisses_login_dialog_before_classifying():
@@ -937,6 +952,49 @@ def test_playwright_crawler_client_searches_via_site_input_before_fallback():
     assert client._page.submitted_queries == ["抗痘博主"]
     assert "Enter" in client._page.keyboard.presses
     assert len(client._page.mouse_clicks) == 1
+
+
+def test_playwright_crawler_client_uses_loaded_search_body_after_goto_timeout():
+    class BodyLocator:
+        def inner_text(self):
+            return "正常的彩妆首页内容"
+
+    class EmptyLocator:
+        def count(self):
+            return 0
+
+    class DummyPage:
+        url = "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3"
+
+        def goto(self, url, wait_until, timeout):
+            raise TimeoutError("domcontentloaded timed out")
+
+        def wait_for_load_state(self, _state, timeout):
+            return None
+
+        def locator(self, selector):
+            if selector == "body":
+                return BodyLocator()
+            return EmptyLocator()
+
+        def content(self):
+            return "<html><body>正常的彩妆首页内容</body></html>"
+
+        def evaluate(self, _script):
+            return None
+
+        def wait_for_timeout(self, _ms):
+            return None
+
+    class DummySession:
+        def new_page(self):
+            return DummyPage()
+
+    client = PlaywrightCrawlerClient(DummySession(), safe_mode=False)
+
+    assert client.fetch_homefeed_result_htmls()[0] == (
+        "<html><body>正常的彩妆首页内容</body></html>"
+    )
 
 
 def test_playwright_crawler_client_reuses_same_page_across_requests():

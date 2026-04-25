@@ -182,6 +182,47 @@ def test_run_crawl_homefeed_collects_profiles_from_feed_state():
     assert result.contact_leads[0].normalized_value == "b@example.com"
 
 
+def test_run_crawl_homefeed_skips_existing_accounts_and_backfills():
+    homefeed_url = "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3"
+    new_profile_url = "https://www.xiaohongshu.com/user/profile/user-new?xsec_source=pc_feed"
+    pages = {
+        new_profile_url: """
+        <section class="profile">
+          <div class="user-id">账号ID: user-new</div>
+          <h1 class="user-name">New</h1>
+          <div class="user-bio">彩妆博主 邮箱：new@example.com</div>
+        </section>
+        """,
+    }
+    homefeed_html = """
+    <div class="note-item">
+      <div class="card-bottom-wrapper">
+        <a class="author" href="/user/profile/user-old?xsec_source=pc_feed">Old</a>
+      </div>
+    </div>
+    <div class="note-item">
+      <div class="card-bottom-wrapper">
+        <a class="author" href="/user/profile/user-new?xsec_source=pc_feed">New</a>
+      </div>
+    </div>
+    """
+    client = FakeClient(
+        pages=pages,
+        search_pages={f"homefeed:{homefeed_url}": homefeed_html},
+    )
+    config = HomefeedCrawlConfig(
+        output_dir="out",
+        homefeed_url=homefeed_url,
+        max_accounts=1,
+        existing_account_ids=("user-old",),
+    )
+
+    result = run_crawl_homefeed_with_client(config, client)
+
+    assert [account.account_id for account in result.accounts] == ["user-new"]
+    assert result.contact_leads[0].normalized_value == "new@example.com"
+
+
 def test_run_crawl_homefeed_rotates_local_proxies_after_403(tmp_path, monkeypatch):
     proxy_list = tmp_path / "proxies.txt"
     proxy_list.write_text(
@@ -231,7 +272,11 @@ def test_run_crawl_homefeed_rotates_local_proxies_after_403(tmp_path, monkeypatc
             return None
 
     monkeypatch.setattr(runner_module, "BrowserSession", FakeBrowserSession)
-    monkeypatch.setattr(runner_module, "_build_playwright_client", lambda _config, session: session)
+    monkeypatch.setattr(
+        runner_module,
+        "_build_playwright_client",
+        lambda _config, session: session,
+    )
     monkeypatch.setattr(
         runner_module,
         "run_crawl_homefeed_with_client",
@@ -249,6 +294,71 @@ def test_run_crawl_homefeed_rotates_local_proxies_after_403(tmp_path, monkeypatc
 
     assert result.run_report.aborted is False
     assert seen_proxies == ["http://proxy-one:8000", "http://proxy-two:8000"]
+
+
+def test_run_crawl_homefeed_retries_with_default_state_after_login_required(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "state.json").write_text("{}", encoding="utf-8")
+    seen_storage_states = []
+    outcomes = iter(
+        [
+            runner_module.CrawlResult(
+                accounts=[],
+                contact_leads=[],
+                run_report=runner_module.RunReport(
+                    seed_url="homefeed:test",
+                    attempted_accounts=0,
+                    succeeded_accounts=0,
+                    failed_accounts=0,
+                    lead_counts={},
+                    aborted=True,
+                    abort_reason="login_required",
+                    errors=[{"source": "homefeed", "error": "login_required"}],
+                ),
+            ),
+            runner_module.CrawlResult(
+                accounts=[],
+                contact_leads=[],
+                run_report=runner_module.RunReport(
+                    seed_url="homefeed:test",
+                    attempted_accounts=0,
+                    succeeded_accounts=0,
+                    failed_accounts=0,
+                    lead_counts={},
+                    errors=[],
+                ),
+            ),
+        ]
+    )
+
+    class FakeBrowserSession:
+        def __init__(self, storage_state, **_kwargs):
+            seen_storage_states.append(storage_state)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+    monkeypatch.setattr(runner_module, "BrowserSession", FakeBrowserSession)
+    monkeypatch.setattr(
+        runner_module,
+        "_build_playwright_client",
+        lambda _config, session: session,
+    )
+    monkeypatch.setattr(
+        runner_module,
+        "run_crawl_homefeed_with_client",
+        lambda _config, _client: next(outcomes),
+    )
+
+    result = run_crawl_homefeed(HomefeedCrawlConfig(output_dir="out"))
+
+    assert result.run_report.aborted is False
+    assert seen_storage_states == ["", "state.json"]
 
 
 def test_run_crawl_seed_filters_successful_accounts_by_gender():

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Deque, Dict, Optional, Protocol, Tuple
 
@@ -24,6 +24,9 @@ from red_crawler.session import (
     PlaywrightCrawlerClient,
     RiskControlTriggered,
 )
+
+
+DEFAULT_STORAGE_STATE_PATH = "state.json"
 
 
 class CrawlClient(Protocol):
@@ -107,6 +110,7 @@ class HomefeedCrawlConfig:
     cache_dir: str | None = None
     cache_ttl_days: int = 7
     gender_filter: str | None = None
+    existing_account_ids: tuple[str, ...] = ()
 
 
 def _normalize_gender_filter(value: str | None) -> str | None:
@@ -232,6 +236,21 @@ def _should_retry_with_new_session(result: CrawlResult) -> bool:
     return False
 
 
+def _should_retry_homefeed_with_default_storage_state(
+    config: HomefeedCrawlConfig, result: CrawlResult
+) -> bool:
+    if config.storage_state:
+        return False
+    if not Path(DEFAULT_STORAGE_STATE_PATH).exists():
+        return False
+    if result.run_report.abort_reason == "login_required":
+        return True
+    for error in result.run_report.errors:
+        if str(error.get("error", "")) == "login_required":
+            return True
+    return False
+
+
 def run_crawl_search(config: SearchCrawlConfig) -> CrawlResult:
     return _run_with_rotating_browser_session(
         config,
@@ -243,11 +262,21 @@ def run_crawl_search(config: SearchCrawlConfig) -> CrawlResult:
 
 
 def run_crawl_homefeed(config: HomefeedCrawlConfig) -> CrawlResult:
-    return _run_with_rotating_browser_session(
+    result = _run_with_rotating_browser_session(
         config,
         lambda session: run_crawl_homefeed_with_client(
             config,
             _build_playwright_client(config, session),
+        ),
+    )
+    if not _should_retry_homefeed_with_default_storage_state(config, result):
+        return result
+    retry_config = replace(config, storage_state=DEFAULT_STORAGE_STATE_PATH)
+    return _run_with_rotating_browser_session(
+        retry_config,
+        lambda session: run_crawl_homefeed_with_client(
+            retry_config,
+            _build_playwright_client(retry_config, session),
         ),
     )
 
@@ -262,6 +291,11 @@ def run_crawl_homefeed_with_client(
     aborted = False
     abort_reason: str | None = None
     queued_keys: set[str] = set()
+    existing_account_ids = {
+        account_id.strip()
+        for account_id in config.existing_account_ids
+        if account_id.strip()
+    }
     source_payload: Dict[str, object] = {
         "bio_text": "彩妆博主",
         "visible_metadata": {"tags": ["彩妆", "美妆"]},
@@ -277,16 +311,18 @@ def run_crawl_homefeed_with_client(
 
     candidates: list[dict[str, object]] = []
     for html in html_snapshots:
-        remaining_slots = config.max_accounts - len(queued_keys)
-        if remaining_slots <= 0:
+        if len(candidates) >= config.max_accounts:
             break
         for candidate in extract_search_result_profiles(
             html=html,
-            max_results=remaining_slots,
+            max_results=max(config.max_accounts * 5, config.max_accounts),
         ):
+            account_id = str(candidate.get("account_id", "")).strip()
+            if account_id in existing_account_ids:
+                continue
             candidate_key = build_profile_dedupe_key(
                 candidate["profile_url"],
-                str(candidate.get("account_id", "")),
+                account_id,
             )
             if candidate_key in queued_keys:
                 continue

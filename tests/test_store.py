@@ -86,6 +86,7 @@ def test_store_records_crawl_result_and_lists_contactable_creators(tmp_path):
     assert [creator.account_id for creator in creators] == ["user-002"]
     assert creators[0].email == "u2@example.com"
     assert creators[0].creator_segment == "creator"
+    assert store.list_creator_account_ids() == {"user-001", "user-002"}
 
     with sqlite3.connect(db_path) as conn:
         edge = conn.execute(
