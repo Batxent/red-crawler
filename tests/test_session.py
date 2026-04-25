@@ -3,6 +3,7 @@
 import red_crawler.session as session_module
 from red_crawler.session import (
     BrowserSession,
+    build_bright_data_browser_api_endpoint,
     build_mouse_backend,
     apply_stealth,
     classify_high_risk_page,
@@ -12,6 +13,80 @@ from red_crawler.session import (
     SafeModeController,
     extract_note_detail_urls,
 )
+
+
+def test_build_bright_data_browser_api_endpoint_from_auth():
+    endpoint = build_bright_data_browser_api_endpoint(
+        auth="brd-customer-123-zone-main:pass@word",
+        environ={},
+    )
+
+    assert (
+        endpoint
+        == "wss://brd-customer-123-zone-main:pass%40word@brd.superproxy.io:9222"
+    )
+
+
+def test_build_bright_data_browser_api_endpoint_prefers_explicit_endpoint():
+    endpoint = build_bright_data_browser_api_endpoint(
+        endpoint="wss://user:pass@custom.example:9222",
+        auth="ignored:ignored",
+        environ={},
+    )
+
+    assert endpoint == "wss://user:pass@custom.example:9222"
+
+
+def test_browser_session_connects_to_bright_data_cdp(tmp_path, monkeypatch):
+    state_path = tmp_path / "state.json"
+    state_path.write_text('{"cookies": [], "origins": []}', encoding="utf-8")
+    captured = {}
+
+    class FakeContext:
+        pass
+
+    class FakeBrowser:
+        contexts = []
+
+        def new_context(self, **kwargs):
+            captured["new_context_kwargs"] = kwargs
+            return FakeContext()
+
+        def close(self):
+            captured["browser_closed"] = True
+
+    class FakeChromium:
+        def connect_over_cdp(self, endpoint):
+            captured["endpoint"] = endpoint
+            return FakeBrowser()
+
+    class FakePlaywright:
+        chromium = FakeChromium()
+
+        def stop(self):
+            captured["playwright_stopped"] = True
+
+    class FakeSyncPlaywright:
+        def start(self):
+            captured["started"] = True
+            return FakePlaywright()
+
+    monkeypatch.setattr(session_module, "sync_playwright", lambda: FakeSyncPlaywright())
+
+    with BrowserSession(
+        str(state_path),
+        browser_mode="bright-data",
+        browser_auth="user:pass",
+    ) as browser_session:
+        assert isinstance(browser_session.context, FakeContext)
+
+    assert captured == {
+        "started": True,
+        "endpoint": "wss://user:pass@brd.superproxy.io:9222",
+        "new_context_kwargs": {"storage_state": str(state_path)},
+        "browser_closed": True,
+        "playwright_stopped": True,
+    }
 
 
 def test_apply_stealth_uses_stealth_api(monkeypatch):

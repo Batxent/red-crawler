@@ -5,6 +5,9 @@ db_path: ./data/red_crawler.db
 report_dir: ./reports
 output_dir: ./output
 cache_dir: ./.cache/red-crawler
+browser_mode: local
+browser_endpoint:
+browser_auth:
 sync_dependencies: false
 install_browser: false
 runner_command:

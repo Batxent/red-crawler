@@ -97,6 +97,9 @@ class NightlyCollectConfig:
     daily_search_term_budget: int = 2
     safe_mode: bool = True
     interaction_mode: str = "playwright"
+    browser_mode: str = "local"
+    browser_endpoint: str | None = None
+    browser_auth: str | None = None
     cache_ttl_days: int = 7
     refresh_after_days: int = 14
     min_relevance_score: float = 0.7
@@ -448,7 +451,12 @@ def run_nightly_collection(config: NightlyCollectConfig) -> NightlyCollectResult
         log_fn=print,
     )
     store = CrawlerStore(config.db_path)
-    with BrowserSession(config.storage_state) as session:
+    with BrowserSession(
+        config.storage_state,
+        browser_mode=config.browser_mode,
+        browser_endpoint=config.browser_endpoint,
+        browser_auth=config.browser_auth,
+    ) as session:
         client = PlaywrightCrawlerClient(
             session,
             safe_mode=config.safe_mode,

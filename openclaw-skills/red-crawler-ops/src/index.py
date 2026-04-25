@@ -104,6 +104,12 @@ def _extend_bool_flag(argv, flag, value):
         argv.append(flag)
 
 
+def _extend_browser_flags(argv, resolved):
+    _extend_flag(argv, "--browser-mode", resolved.get("browser_mode"))
+    _extend_flag(argv, "--browser-endpoint", resolved.get("browser_endpoint"))
+    _extend_flag(argv, "--browser-auth", resolved.get("browser_auth"))
+
+
 def build_login_command(resolved):
     argv = _get_runner_command(resolved) + ["login"]
     _extend_flag(argv, "--save-state", resolved.get("storage_state"))
@@ -126,6 +132,7 @@ def build_crawl_seed_command(resolved):
     _extend_flag(argv, "--cache-dir", resolved.get("cache_dir"))
     _extend_flag(argv, "--cache-ttl-days", resolved.get("cache_ttl_days"))
     _extend_flag(argv, "--gender-filter", resolved.get("gender_filter"))
+    _extend_browser_flags(argv, resolved)
     _extend_flag(argv, "--db-path", resolved.get("db_path"))
     _extend_flag(argv, "--output-dir", resolved.get("output_dir"))
     return argv
@@ -146,6 +153,7 @@ def build_collect_nightly_command(resolved):
         resolved.get("startup_jitter_minutes"),
     )
     _extend_flag(argv, "--slot-name", resolved.get("slot_name"))
+    _extend_browser_flags(argv, resolved)
     return argv
 
 

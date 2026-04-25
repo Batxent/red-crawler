@@ -48,6 +48,28 @@ red-crawler crawl-seed \
 
 Use `--gender-filter "男"` or `--gender-filter "女"` to keep only inferred male or female accounts in the exported and persisted crawl results.
 
+Use Bright Data Browser API instead of launching local Chromium:
+
+```bash
+export BRIGHT_DATA_BROWSER_API_AUTH="SBR_ZONE_FULL_USERNAME:SBR_ZONE_PASSWORD"
+
+red-crawler crawl-search \
+  --search-term "抗痘博主" \
+  --storage-state "./state.json" \
+  --browser-mode bright-data \
+  --output-dir "./output"
+```
+
+You can also pass the full CDP endpoint directly:
+
+```bash
+red-crawler crawl-seed \
+  --seed-url "https://www.xiaohongshu.com/user/profile/USER_ID" \
+  --storage-state "./state.json" \
+  --browser-mode bright-data \
+  --browser-endpoint "wss://SBR_ZONE_FULL_USERNAME:SBR_ZONE_PASSWORD@brd.superproxy.io:9222"
+```
+
 `crawl-seed` now does both:
 
 - exports `accounts.csv`, `contact_leads.csv`, `run_report.json`

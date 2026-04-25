@@ -17,6 +17,7 @@ from red_crawler.nightly import (
 )
 from red_crawler.runner import CrawlConfig, SearchCrawlConfig, run_crawl_search, run_crawl_seed
 from red_crawler.session import (
+    SUPPORTED_BROWSER_MODES,
     SUPPORTED_INTERACTION_MODES,
     open_xiaohongshu,
     save_login_storage_state,
@@ -32,6 +33,23 @@ def _default_login_qr_path(save_state: str) -> Path:
 
 def _default_login_session_path(save_state: str) -> Path:
     return Path(save_state).with_suffix(".login-session.json")
+
+
+def _add_browser_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--browser-mode",
+        choices=SUPPORTED_BROWSER_MODES,
+        default="local",
+        help="Browser connection mode. Use bright-data to connect to Bright Data Browser API.",
+    )
+    parser.add_argument(
+        "--browser-endpoint",
+        help="Remote CDP WebSocket endpoint, for example wss://USER:PASS@brd.superproxy.io:9222.",
+    )
+    parser.add_argument(
+        "--browser-auth",
+        help="Bright Data Browser API credentials formatted as USER:PASS.",
+    )
 
 
 def _add_discovery_collect_args(parser: argparse.ArgumentParser) -> None:
@@ -51,6 +69,7 @@ def _add_discovery_collect_args(parser: argparse.ArgumentParser) -> None:
         choices=SUPPORTED_INTERACTION_MODES,
         default="playwright",
     )
+    _add_browser_args(parser)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -75,6 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=SUPPORTED_INTERACTION_MODES,
         default="playwright",
     )
+    _add_browser_args(crawl_seed)
     crawl_seed.add_argument("--db-path", default="data/red_crawler.db")
     crawl_seed.add_argument("--output-dir", default="output")
 
@@ -97,6 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=SUPPORTED_INTERACTION_MODES,
         default="playwright",
     )
+    _add_browser_args(crawl_search)
     crawl_search.add_argument("--db-path", default="data/red_crawler.db")
     crawl_search.add_argument("--output-dir", default="output")
 
@@ -240,6 +261,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             startup_jitter_minutes=args.startup_jitter_minutes,
             slot_name=args.slot_name,
             interaction_mode=args.interaction_mode,
+            browser_mode=args.browser_mode,
+            browser_endpoint=args.browser_endpoint,
+            browser_auth=args.browser_auth,
         )
         run_nightly_collection(config)
         return 0
@@ -309,6 +333,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             creator_only=args.creator_only,
             safe_mode=args.safe_mode,
             interaction_mode=args.interaction_mode,
+            browser_mode=args.browser_mode,
+            browser_endpoint=args.browser_endpoint,
+            browser_auth=args.browser_auth,
             cache_dir=args.cache_dir,
             cache_ttl_days=args.cache_ttl_days,
             gender_filter=args.gender_filter,
@@ -337,6 +364,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         include_note_recommendations=args.include_note_recommendations,
         safe_mode=args.safe_mode,
         interaction_mode=args.interaction_mode,
+        browser_mode=args.browser_mode,
+        browser_endpoint=args.browser_endpoint,
+        browser_auth=args.browser_auth,
         cache_dir=args.cache_dir,
         cache_ttl_days=args.cache_ttl_days,
         gender_filter=args.gender_filter,

@@ -42,6 +42,9 @@ class CrawlConfig:
     include_note_recommendations: bool = False
     safe_mode: bool = False
     interaction_mode: str = "playwright"
+    browser_mode: str = "local"
+    browser_endpoint: str | None = None
+    browser_auth: str | None = None
     cache_dir: str | None = None
     cache_ttl_days: int = 7
     gender_filter: str | None = None
@@ -59,6 +62,9 @@ class SearchCrawlConfig:
     creator_only: bool = False
     safe_mode: bool = False
     interaction_mode: str = "playwright"
+    browser_mode: str = "local"
+    browser_endpoint: str | None = None
+    browser_auth: str | None = None
     cache_dir: str | None = None
     cache_ttl_days: int = 7
     gender_filter: str | None = None
@@ -102,7 +108,12 @@ def _matches_gender_filter(account: AccountRecord, gender_filter: str | None) ->
 
 
 def run_crawl_seed(config: CrawlConfig) -> CrawlResult:
-    with BrowserSession(config.storage_state) as session:
+    with BrowserSession(
+        config.storage_state,
+        browser_mode=config.browser_mode,
+        browser_endpoint=config.browser_endpoint,
+        browser_auth=config.browser_auth,
+    ) as session:
         client = PlaywrightCrawlerClient(
             session,
             safe_mode=config.safe_mode,
@@ -114,7 +125,12 @@ def run_crawl_seed(config: CrawlConfig) -> CrawlResult:
 
 
 def run_crawl_search(config: SearchCrawlConfig) -> CrawlResult:
-    with BrowserSession(config.storage_state) as session:
+    with BrowserSession(
+        config.storage_state,
+        browser_mode=config.browser_mode,
+        browser_endpoint=config.browser_endpoint,
+        browser_auth=config.browser_auth,
+    ) as session:
         client = PlaywrightCrawlerClient(
             session,
             safe_mode=config.safe_mode,

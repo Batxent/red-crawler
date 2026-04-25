@@ -380,6 +380,62 @@ def test_cli_crawl_search_exports_and_persists_result(tmp_path, monkeypatch):
     assert (tmp_path / "run_report.json").exists()
 
 
+def test_cli_crawl_search_passes_bright_data_browser_config(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_run_crawl_search(config):
+        captured["browser_mode"] = config.browser_mode
+        captured["browser_endpoint"] = config.browser_endpoint
+        captured["browser_auth"] = config.browser_auth
+        return CrawlResult(
+            accounts=[],
+            contact_leads=[],
+            run_report=RunReport(
+                seed_url="search:抗痘博主",
+                attempted_accounts=0,
+                succeeded_accounts=0,
+                failed_accounts=0,
+                lead_counts={},
+                errors=[],
+            ),
+        )
+
+    class FakeStore:
+        def __init__(self, _db_path):
+            pass
+
+        def record_crawl_result(self, result, run_type, safe_mode, started_at):
+            return 1
+
+    monkeypatch.setattr("red_crawler.cli.run_crawl_search", fake_run_crawl_search)
+    monkeypatch.setattr("red_crawler.cli.CrawlerStore", FakeStore)
+
+    exit_code = main(
+        [
+            "crawl-search",
+            "--search-term",
+            "抗痘博主",
+            "--storage-state",
+            "state.json",
+            "--browser-mode",
+            "bright-data",
+            "--browser-auth",
+            "user:pass",
+            "--browser-endpoint",
+            "wss://user:pass@brd.superproxy.io:9222",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured == {
+        "browser_mode": "bright-data",
+        "browser_endpoint": "wss://user:pass@brd.superproxy.io:9222",
+        "browser_auth": "user:pass",
+    }
+
+
 def test_cli_collect_nightly_runs_worker(tmp_path, monkeypatch):
     captured = {}
 

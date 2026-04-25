@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Callable, List, Protocol
 from urllib.parse import quote, urljoin
 
-from playwright.sync_api import BrowserContext, Page, Playwright, sync_playwright
+from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
 from playwright_stealth import Stealth
 from browserforge.injectors.playwright import NewContext
 from browserforge.fingerprints import FingerprintGenerator, Fingerprint
@@ -66,6 +66,49 @@ BACK_BUTTON_SELECTORS = (
 )
 SEARCH_RESULT_CARD_SELECTOR = ".card-bottom-wrapper a.author[href*='/user/profile/']"
 SUPPORTED_INTERACTION_MODES = ("playwright", "os-mouse")
+SUPPORTED_BROWSER_MODES = ("local", "bright-data")
+BRIGHT_DATA_BROWSER_API_ENDPOINT_ENVS = (
+    "BRIGHT_DATA_BROWSER_API_ENDPOINT",
+    "BRIGHT_DATA_BROWSER_API_URL",
+)
+BRIGHT_DATA_BROWSER_API_AUTH_ENV = "BRIGHT_DATA_BROWSER_API_AUTH"
+BRIGHT_DATA_BROWSER_API_HOST = "brd.superproxy.io:9222"
+
+
+def build_bright_data_browser_api_endpoint(
+    *,
+    endpoint: str | None = None,
+    auth: str | None = None,
+    environ: dict[str, str] | None = None,
+) -> str:
+    env = os.environ if environ is None else environ
+    resolved_endpoint = (endpoint or "").strip()
+    if not resolved_endpoint:
+        for env_name in BRIGHT_DATA_BROWSER_API_ENDPOINT_ENVS:
+            resolved_endpoint = env.get(env_name, "").strip()
+            if resolved_endpoint:
+                break
+    if resolved_endpoint:
+        if not resolved_endpoint.startswith("wss://"):
+            raise ValueError("Bright Data Browser API endpoint must start with wss://")
+        return resolved_endpoint
+
+    resolved_auth = (auth or env.get(BRIGHT_DATA_BROWSER_API_AUTH_ENV, "")).strip()
+    if not resolved_auth:
+        env_names = ", ".join(
+            (*BRIGHT_DATA_BROWSER_API_ENDPOINT_ENVS, BRIGHT_DATA_BROWSER_API_AUTH_ENV)
+        )
+        raise RuntimeError(
+            "Bright Data Browser API mode requires --browser-endpoint, --browser-auth, "
+            f"or one of these environment variables: {env_names}"
+        )
+    if ":" not in resolved_auth:
+        raise ValueError("Bright Data Browser API auth must be formatted as USER:PASS")
+    username, password = resolved_auth.split(":", 1)
+    return (
+        f"wss://{quote(username, safe='')}:{quote(password, safe='')}"
+        f"@{BRIGHT_DATA_BROWSER_API_HOST}"
+    )
 
 
 def _get_or_create_fingerprint(storage_state_path: Path) -> Fingerprint:
@@ -531,10 +574,21 @@ class SafeModeController:
 
 
 class BrowserSession:
-    def __init__(self, storage_state: str, headless: bool = False):
+    def __init__(
+        self,
+        storage_state: str,
+        headless: bool = False,
+        browser_mode: str = "local",
+        browser_endpoint: str | None = None,
+        browser_auth: str | None = None,
+    ):
         self.storage_state = str(storage_state)
         self.headless = headless
+        self.browser_mode = browser_mode
+        self.browser_endpoint = browser_endpoint
+        self.browser_auth = browser_auth
         self._playwright: Playwright | None = None
+        self._browser: Browser | None = None
         self._context: BrowserContext | None = None
 
     def __enter__(self) -> "BrowserSession":
@@ -543,23 +597,84 @@ class BrowserSession:
             raise FileNotFoundError(
                 f"storage state file not found: {storage_state_path.as_posix()}"
             )
+        if self.browser_mode not in SUPPORTED_BROWSER_MODES:
+            raise ValueError(
+                f"browser_mode must be one of: {', '.join(SUPPORTED_BROWSER_MODES)}"
+            )
         self._playwright = sync_playwright().start()
-        browser = self._playwright.chromium.launch(headless=self.headless)
-        fp = _get_or_create_fingerprint(storage_state_path)
-        self._context = NewContext(
-            browser,
-            fingerprint=fp,
-            storage_state=self.storage_state,
-        )
+        if self.browser_mode == "bright-data":
+            endpoint = build_bright_data_browser_api_endpoint(
+                endpoint=self.browser_endpoint,
+                auth=self.browser_auth,
+            )
+            self._browser = self._playwright.chromium.connect_over_cdp(endpoint)
+            self._context = self._new_remote_context(storage_state_path)
+        else:
+            self._browser = self._playwright.chromium.launch(headless=self.headless)
+            fp = _get_or_create_fingerprint(storage_state_path)
+            self._context = NewContext(
+                self._browser,
+                fingerprint=fp,
+                storage_state=self.storage_state,
+            )
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        if self._context is not None:
+        if self._browser is not None:
+            self._browser.close()
+            self._browser = None
+            self._context = None
+        elif self._context is not None:
             self._context.browser.close()
             self._context = None
         if self._playwright is not None:
             self._playwright.stop()
             self._playwright = None
+
+    def _new_remote_context(self, storage_state_path: Path) -> BrowserContext:
+        if self._browser is None:
+            raise RuntimeError("browser session is not started")
+        try:
+            return self._browser.new_context(storage_state=str(storage_state_path))
+        except Exception:
+            if not self._browser.contexts:
+                raise
+            context = self._browser.contexts[0]
+            self._apply_storage_state_to_context(context, storage_state_path)
+            return context
+
+    def _apply_storage_state_to_context(
+        self,
+        context: BrowserContext,
+        storage_state_path: Path,
+    ) -> None:
+        state = json.loads(storage_state_path.read_text(encoding="utf-8"))
+        cookies = state.get("cookies", [])
+        if cookies:
+            context.add_cookies(cookies)
+        origins = state.get("origins", [])
+        if not origins:
+            return
+        page = context.new_page()
+        try:
+            for origin_state in origins:
+                origin = str(origin_state.get("origin", "")).strip()
+                local_storage = origin_state.get("localStorage", [])
+                if not origin or not local_storage:
+                    continue
+                page.goto(origin, wait_until="domcontentloaded", timeout=30000)
+                page.evaluate(
+                    """
+                    entries => {
+                      for (const entry of entries) {
+                        window.localStorage.setItem(entry.name, entry.value);
+                      }
+                    }
+                    """,
+                    local_storage,
+                )
+        finally:
+            page.close()
 
     @property
     def context(self) -> BrowserContext:

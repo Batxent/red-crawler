@@ -65,6 +65,7 @@ def test_skill_metadata_contract_matches_runtime():
     assert "report_dir: ./reports" in CONFIG_EXAMPLE_TEXT
     assert "output_dir: ./output" in CONFIG_EXAMPLE_TEXT
     assert "cache_dir: ./.cache/red-crawler" in CONFIG_EXAMPLE_TEXT
+    assert "browser_mode: local" in CONFIG_EXAMPLE_TEXT
     assert "sync_dependencies: false" in CONFIG_EXAMPLE_TEXT
     assert "install_browser: false" in CONFIG_EXAMPLE_TEXT
     assert "- red-crawler" in CONFIG_EXAMPLE_TEXT
@@ -550,6 +551,32 @@ def test_build_crawl_seed_command_uses_overrides(tmp_path):
         "data/red_crawler.db",
         "--output-dir",
         "output",
+    ]
+
+
+def test_build_crawl_seed_command_supports_bright_data_browser(tmp_path):
+    command = build_command(
+        {
+            "action": "crawl_seed",
+            "workspace_path": str(tmp_path),
+            "storage_state": "state.json",
+            "seed_url": "https://www.xiaohongshu.com/user/profile/user-001",
+            "browser_mode": "bright-data",
+            "browser_auth": "user:pass",
+        }
+    )
+
+    assert command == [
+        "red-crawler",
+        "crawl-seed",
+        "--seed-url",
+        "https://www.xiaohongshu.com/user/profile/user-001",
+        "--storage-state",
+        "state.json",
+        "--browser-mode",
+        "bright-data",
+        "--browser-auth",
+        "user:pass",
     ]
 
 
