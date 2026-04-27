@@ -13,6 +13,13 @@ OBFUSCATED_EMAIL_RE = re.compile(
 OBFUSCATED_QQ_EMAIL_RE = re.compile(
     r"(?<![A-Za-z0-9._%+-])([1-9]\d{4,11})\s*@\s*(?:qq|QQ|q|Q|企鹅|🐧)\s*(?:\.|点)\s*com\b"
 )
+EMAIL_PROVIDER_DOMAIN_RE = re.compile(
+    r"(?<![A-Za-z0-9.-])("
+    r"(?:qq|foxmail|gmail|163|126|yeah|outlook|hotmail|icloud|sina|139|189|aliyun|yahoo)"
+    r"\.(?:com|cn|net)"
+    r")(?![A-Za-z0-9.-])",
+    re.IGNORECASE,
+)
 QQ_MAIL_LABEL_RE = re.compile(
     r"(?:q邮箱|Q邮箱|qq邮箱|QQ邮箱|企鹅邮箱|🐧邮箱)\s*[:：]?\s*([1-9]\d{4,11})"
 )
@@ -113,15 +120,46 @@ def _normalize_email_text(text: str) -> str:
 
 def _contains_email_contact(text: str) -> bool:
     email_text = _normalize_email_text(text)
-    return any(
-        pattern.search(email_text)
-        for pattern in (
-            EMAIL_RE,
-            OBFUSCATED_EMAIL_RE,
-            OBFUSCATED_QQ_EMAIL_RE,
-            QQ_MAIL_LABEL_RE,
+    return (
+        any(
+            pattern.search(email_text)
+            for pattern in (
+                EMAIL_RE,
+                OBFUSCATED_EMAIL_RE,
+                OBFUSCATED_QQ_EMAIL_RE,
+                QQ_MAIL_LABEL_RE,
+            )
         )
+        or bool(_extract_provider_domain_emails(email_text))
     )
+
+
+def _extract_provider_domain_emails(text: str) -> list[tuple[str, str]]:
+    emails: list[tuple[str, str]] = []
+    for match in EMAIL_PROVIDER_DOMAIN_RE.finditer(text):
+        username = _scan_email_username_before_domain(text, match.start())
+        if not username:
+            continue
+        email = f"{username.lower()}@{match.group(1).lower()}"
+        emails.append((email, f"{username}{text[match.start():match.end()]}"))
+    return emails
+
+
+def _scan_email_username_before_domain(text: str, domain_start: int) -> str:
+    index = domain_start - 1
+    while index >= 0 and not text[index].isalnum():
+        index -= 1
+    end = index + 1
+    while index >= 0 and (
+        text[index].isalnum() or text[index] in "._%+-"
+    ):
+        index -= 1
+    username = text[index + 1 : end].strip("._%+-").lower()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._%+-]{2,63}", username):
+        return ""
+    if not any(char.isalpha() for char in username) and len(username) < 5:
+        return ""
+    return username
 
 
 def _dedupe(leads: Iterable[ContactLead]) -> List[ContactLead]:
@@ -140,9 +178,11 @@ def extract_contact_leads(account_id: str, bio_text: str) -> List[ContactLead]:
     text = _clean_text(bio_text)
     email_text = _normalize_email_text(text)
     leads: List[ContactLead] = []
+    email_local_parts: set[str] = set()
 
     for match in EMAIL_RE.finditer(email_text):
         email = match.group(1).lower()
+        email_local_parts.add(email.split("@", 1)[0])
         leads.append(
             ContactLead(
                 account_id=account_id,
@@ -158,6 +198,7 @@ def extract_contact_leads(account_id: str, bio_text: str) -> List[ContactLead]:
 
     for match in OBFUSCATED_EMAIL_RE.finditer(email_text):
         email = f"{match.group(1).lower()}@{match.group(2).lower()}.{match.group(3).lower()}"
+        email_local_parts.add(email.split("@", 1)[0])
         leads.append(
             ContactLead(
                 account_id=account_id,
@@ -173,6 +214,7 @@ def extract_contact_leads(account_id: str, bio_text: str) -> List[ContactLead]:
 
     for match in OBFUSCATED_QQ_EMAIL_RE.finditer(email_text):
         email = f"{match.group(1)}@qq.com"
+        email_local_parts.add(email.split("@", 1)[0])
         leads.append(
             ContactLead(
                 account_id=account_id,
@@ -188,6 +230,7 @@ def extract_contact_leads(account_id: str, bio_text: str) -> List[ContactLead]:
 
     for match in QQ_MAIL_LABEL_RE.finditer(email_text):
         email = f"{match.group(1)}@qq.com"
+        email_local_parts.add(email.split("@", 1)[0])
         leads.append(
             ContactLead(
                 account_id=account_id,
@@ -196,6 +239,21 @@ def extract_contact_leads(account_id: str, bio_text: str) -> List[ContactLead]:
                 raw_snippet=match.group(0).strip(" ，。;；"),
                 confidence=0.9,
                 extractor_name="qq_mail_label_regex",
+                source_field="bio",
+                dedupe_key=f"email:{email}",
+            )
+        )
+
+    for email, raw_snippet in _extract_provider_domain_emails(email_text):
+        email_local_parts.add(email.split("@", 1)[0])
+        leads.append(
+            ContactLead(
+                account_id=account_id,
+                lead_type="email",
+                normalized_value=email,
+                raw_snippet=raw_snippet.strip(" ，。;；"),
+                confidence=0.86,
+                extractor_name="provider_domain_backfill_email",
                 source_field="bio",
                 dedupe_key=f"email:{email}",
             )
@@ -310,6 +368,8 @@ def extract_contact_leads(account_id: str, bio_text: str) -> List[ContactLead]:
 
     for match in GENERIC_CONTACT_ID_RE.finditer(contact_text):
         value = match.group(1).lower()
+        if value in email_local_parts:
+            continue
         leads.append(
             ContactLead(
                 account_id=account_id,

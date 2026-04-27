@@ -954,6 +954,214 @@ def test_playwright_crawler_client_searches_via_site_input_before_fallback():
     assert len(client._page.mouse_clicks) == 1
 
 
+def test_playwright_crawler_client_keeps_scrolling_when_visible_card_count_is_stable():
+    class DummyResponse:
+        status = 200
+
+    class BodyLocator:
+        def inner_text(self):
+            return "正常的彩妆首页内容"
+
+    class SearchResultLocator:
+        def count(self):
+            return 25
+
+    class EmptyLocator:
+        def count(self):
+            return 0
+
+    class DummyMouse:
+        def __init__(self, page):
+            self.page = page
+
+        def wheel(self, _dx, _dy):
+            self.page.scroll_index += 1
+
+    class DummyPage:
+        viewport_size = {"width": 1280, "height": 900}
+
+        def __init__(self):
+            self.scroll_index = 0
+            self.mouse = DummyMouse(self)
+
+        def goto(self, _url, wait_until, timeout):
+            return DummyResponse()
+
+        def wait_for_load_state(self, _state, timeout):
+            return None
+
+        def locator(self, selector):
+            if selector == "body":
+                return BodyLocator()
+            if selector == ".card-bottom-wrapper a.author[href*='/user/profile/']":
+                return SearchResultLocator()
+            return EmptyLocator()
+
+        def content(self):
+            return f"""
+            <div class="card-bottom-wrapper">
+              <a class="author" href="/user/profile/user-{self.scroll_index:03d}">
+                User {self.scroll_index}
+              </a>
+            </div>
+            """
+
+        def wait_for_timeout(self, _ms):
+            return None
+
+    class DummySession:
+        def new_page(self):
+            return DummyPage()
+
+    client = PlaywrightCrawlerClient(
+        DummySession(),
+        safe_mode=False,
+        search_scroll_rounds=2,
+    )
+
+    htmls = client.fetch_homefeed_result_htmls()
+
+    assert len(htmls) == 3
+    assert "user-000" in htmls[0]
+    assert "user-001" in htmls[1]
+    assert "user-002" in htmls[2]
+
+
+def test_playwright_crawler_client_scrolls_homefeed_until_target_profiles_are_found():
+    class DummyResponse:
+        status = 200
+
+    class BodyLocator:
+        def inner_text(self):
+            return "正常的彩妆首页内容"
+
+    class EmptyLocator:
+        def count(self):
+            return 0
+
+    class DummyMouse:
+        def __init__(self, page):
+            self.page = page
+
+        def wheel(self, _dx, _dy):
+            self.page.scroll_index += 1
+
+    class DummyPage:
+        viewport_size = {"width": 1280, "height": 900}
+
+        def __init__(self):
+            self.scroll_index = 0
+            self.mouse = DummyMouse(self)
+
+        def goto(self, _url, wait_until, timeout):
+            return DummyResponse()
+
+        def wait_for_load_state(self, _state, timeout):
+            return None
+
+        def locator(self, selector):
+            if selector == "body":
+                return BodyLocator()
+            return EmptyLocator()
+
+        def content(self):
+            return f"""
+            <div class="card-bottom-wrapper">
+              <a class="author" href="/user/profile/user-{self.scroll_index:03d}">
+                User {self.scroll_index}
+              </a>
+            </div>
+            """
+
+        def wait_for_timeout(self, _ms):
+            return None
+
+    class DummySession:
+        def new_page(self):
+            return DummyPage()
+
+    client = PlaywrightCrawlerClient(
+        DummySession(),
+        safe_mode=False,
+        search_scroll_rounds=0,
+    )
+
+    htmls = client.fetch_homefeed_result_htmls(target_profile_count=3)
+
+    assert len(htmls) == 3
+    assert "user-000" in htmls[0]
+    assert "user-001" in htmls[1]
+    assert "user-002" in htmls[2]
+
+
+def test_playwright_crawler_client_scrolls_homefeed_scrollable_containers():
+    class DummyResponse:
+        status = 200
+
+    class BodyLocator:
+        def inner_text(self):
+            return "正常的彩妆首页内容"
+
+    class EmptyLocator:
+        def count(self):
+            return 0
+
+    class DummyMouse:
+        def wheel(self, _dx, _dy):
+            return None
+
+    class DummyPage:
+        viewport_size = {"width": 1280, "height": 900}
+
+        def __init__(self):
+            self.container_scroll_index = 0
+            self.mouse = DummyMouse()
+
+        def goto(self, _url, wait_until, timeout):
+            return DummyResponse()
+
+        def wait_for_load_state(self, _state, timeout):
+            return None
+
+        def locator(self, selector):
+            if selector == "body":
+                return BodyLocator()
+            return EmptyLocator()
+
+        def content(self):
+            return f"""
+            <div class="card-bottom-wrapper">
+              <a class="author" href="/user/profile/user-{self.container_scroll_index:03d}">
+                User {self.container_scroll_index}
+              </a>
+            </div>
+            """
+
+        def evaluate(self, script):
+            assert "scrollTop" in script
+            self.container_scroll_index += 1
+
+        def wait_for_timeout(self, _ms):
+            return None
+
+    class DummySession:
+        def new_page(self):
+            return DummyPage()
+
+    client = PlaywrightCrawlerClient(
+        DummySession(),
+        safe_mode=False,
+        search_scroll_rounds=0,
+    )
+
+    htmls = client.fetch_homefeed_result_htmls(target_profile_count=3)
+
+    assert len(htmls) == 3
+    assert "user-000" in htmls[0]
+    assert "user-001" in htmls[1]
+    assert "user-002" in htmls[2]
+
+
 def test_playwright_crawler_client_uses_loaded_search_body_after_goto_timeout():
     class BodyLocator:
         def inner_text(self):

@@ -18,6 +18,8 @@ class FakeClient:
         self.note_pages = note_pages or {}
         self.search_pages = search_pages or {}
         self.search_queries = []
+        self.homefeed_target_profile_count = None
+        self.homefeed_existing_account_ids = ()
 
     def fetch_profile_html(self, profile_url):
         if profile_url in self.failures:
@@ -34,7 +36,15 @@ class FakeClient:
             return [payload]
         return payload
 
-    def fetch_homefeed_result_htmls(self, source_url):
+    def fetch_homefeed_result_htmls(
+        self,
+        source_url,
+        *,
+        target_profile_count=None,
+        existing_account_ids=(),
+    ):
+        self.homefeed_target_profile_count = target_profile_count
+        self.homefeed_existing_account_ids = existing_account_ids
         payload = self.search_pages.get(f"homefeed:{source_url}", [])
         if isinstance(payload, str):
             return [payload]
@@ -219,6 +229,8 @@ def test_run_crawl_homefeed_skips_existing_accounts_and_backfills():
 
     result = run_crawl_homefeed_with_client(config, client)
 
+    assert client.homefeed_target_profile_count == 1
+    assert client.homefeed_existing_account_ids == ("user-old",)
     assert [account.account_id for account in result.accounts] == ["user-new"]
     assert result.contact_leads[0].normalized_value == "new@example.com"
 

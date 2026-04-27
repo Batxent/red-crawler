@@ -20,6 +20,7 @@ from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_
 from playwright_stealth import Stealth
 from browserforge.injectors.playwright import NewContext
 from browserforge.fingerprints import FingerprintGenerator, Fingerprint
+from red_crawler.crawl.similar import extract_search_result_profiles
 from red_crawler.profile_url import (
     canonicalize_profile_url,
     extract_account_id_from_profile_url,
@@ -655,12 +656,44 @@ class SafeModeController:
         delta_y = max(1, int(abs(height * delta_ratio)))
         if delta_ratio < 0:
             delta_y = -delta_y
-        if self.mouse_backend.wheel(page, delta_y=delta_y):
-            return
-        page.evaluate(
-            "window.scrollBy(0, Math.round(window.innerHeight * %s))"
-            % f"{delta_ratio:.2f}"
-        )
+        self.mouse_backend.wheel(page, delta_y=delta_y)
+        try:
+            page.evaluate(
+                """
+                (() => {
+                  const ratio = %s;
+                  const delta = Math.round(window.innerHeight * ratio);
+                  window.scrollBy(0, delta);
+
+                  const candidates = [
+                    document.scrollingElement,
+                    document.documentElement,
+                    document.body,
+                    ...document.querySelectorAll('*'),
+                  ].filter((node, index, nodes) => {
+                    if (!node || nodes.indexOf(node) !== index) return false;
+                    const style = window.getComputedStyle(node);
+                    const overflowY = style.overflowY || '';
+                    const scrollableStyle = /auto|scroll|overlay/.test(overflowY);
+                    return node.scrollHeight > node.clientHeight + 80 || scrollableStyle;
+                  });
+
+                  candidates
+                    .sort((left, right) => {
+                      const leftRoom = left.scrollHeight - left.clientHeight - left.scrollTop;
+                      const rightRoom = right.scrollHeight - right.clientHeight - right.scrollTop;
+                      return Math.abs(rightRoom) - Math.abs(leftRoom);
+                    })
+                    .slice(0, 8)
+                    .forEach((node) => {
+                      node.scrollTop += delta;
+                    });
+                })()
+                """
+                % f"{delta_ratio:.4f}"
+            )
+        except Exception:
+            pass
 
     def _viewport_dimensions(self, page: Page) -> tuple[int, int]:
         viewport = getattr(page, "viewport_size", None)
@@ -936,7 +969,14 @@ class PlaywrightCrawlerClient:
         self.safe_mode_controller.on_success()
         return page.content()
 
-    def _load_search_result_htmls(self, url: str, scroll_rounds: int = 2) -> List[str]:
+    def _load_search_result_htmls(
+        self,
+        url: str,
+        scroll_rounds: int = 2,
+        *,
+        target_profile_count: int | None = None,
+        existing_account_ids: tuple[str, ...] = (),
+    ) -> List[str]:
         self.safe_mode_controller.before_request()
         page = self._get_page()
         try:
@@ -954,7 +994,12 @@ class PlaywrightCrawlerClient:
             )
             raise RuntimeError(f"page request failed with status {response.status}")
         self._raise_if_high_risk_page(page)
-        return self._capture_search_result_htmls(page, scroll_rounds=scroll_rounds)
+        return self._capture_search_result_htmls(
+            page,
+            scroll_rounds=scroll_rounds,
+            target_profile_count=target_profile_count,
+            existing_account_ids=existing_account_ids,
+        )
 
     def _load_search_result_htmls_via_ui(
         self,
@@ -997,13 +1042,23 @@ class PlaywrightCrawlerClient:
         page: Page,
         *,
         scroll_rounds: int,
+        target_profile_count: int | None = None,
+        existing_account_ids: tuple[str, ...] = (),
     ) -> List[str]:
         html_snapshots: List[str] = []
-        last_length = -1
+        target_count = max(int(target_profile_count or 0), 0)
+        max_rounds = max(int(scroll_rounds), 0)
+        if target_count > 0:
+            max_rounds = max(max_rounds, min(max(target_count * 5, 30), 600))
+        existing_ids = {
+            account_id.strip()
+            for account_id in existing_account_ids
+            if account_id.strip()
+        }
         self._page_kind = "search"
         self.safe_mode_controller.after_page_load(page, page_kind="search")
 
-        for round_number in range(scroll_rounds + 1):
+        for round_number in range(max_rounds + 1):
             try:
                 page.wait_for_load_state("networkidle", timeout=5000)
             except Exception:
@@ -1015,19 +1070,61 @@ class PlaywrightCrawlerClient:
             if html not in html_snapshots:
                 html_snapshots.append(html)
 
-            card_count = page.locator(SEARCH_RESULT_CARD_SELECTOR).count()
+            if target_count > 0 and self._count_new_search_result_profiles(
+                html_snapshots,
+                target_profile_count=target_count,
+                existing_account_ids=existing_ids,
+            ) >= target_count:
+                self.safe_mode_controller.log_fn(
+                    "safe-mode: homefeed target reached after "
+                    f"{round_number + 1} snapshots"
+                )
+                break
+
+            if target_count > 0 and (round_number + 1) % 10 == 0:
+                profile_count = self._count_new_search_result_profiles(
+                    html_snapshots,
+                    target_profile_count=target_count,
+                    existing_account_ids=existing_ids,
+                )
+                self.safe_mode_controller.log_fn(
+                    "safe-mode: homefeed collected "
+                    f"{profile_count}/{target_count} new profile candidates "
+                    f"after {round_number + 1} snapshots"
+                )
+
             self.safe_mode_controller.perform_search_scroll(
                 page,
                 round_number=round_number + 1,
             )
             if not self.safe_mode_controller.enabled:
                 page.wait_for_timeout(1200)
-            if card_count == last_length:
-                break
-            last_length = card_count
 
         self.safe_mode_controller.on_success()
         return html_snapshots
+
+    def _count_new_search_result_profiles(
+        self,
+        html_snapshots: list[str],
+        *,
+        target_profile_count: int,
+        existing_account_ids: set[str],
+    ) -> int:
+        seen: set[str] = set()
+        max_results = max(target_profile_count * 5, target_profile_count, 50)
+        for html in html_snapshots:
+            for candidate in extract_search_result_profiles(
+                html=html,
+                max_results=max_results,
+                base_url=self.base_url,
+            ):
+                account_id = str(candidate.get("account_id", "")).strip()
+                if not account_id or account_id in existing_account_ids:
+                    continue
+                seen.add(account_id)
+                if len(seen) >= target_profile_count:
+                    return len(seen)
+        return len(seen)
 
     def _get_page(self) -> Page:
         if self._page is not None:
@@ -1393,21 +1490,39 @@ class PlaywrightCrawlerClient:
     def fetch_homefeed_result_htmls(
         self,
         source_url: str = DEFAULT_COSMETICS_HOMEFEED_URL,
+        *,
+        target_profile_count: int | None = None,
+        existing_account_ids: tuple[str, ...] = (),
     ) -> List[str]:
         cache_key = f"homefeed:{source_url}"
         cached = self._search_html_cache.get(cache_key)
         if cached is not None:
-            return list(cached)
+            if self._cached_search_results_satisfy_target(
+                cached,
+                target_profile_count=target_profile_count,
+                existing_account_ids=existing_account_ids,
+            ):
+                return list(cached)
         cache_path = self._cache_path("search", cache_key)
         if cache_path is not None and cache_path.exists():
             if self._is_cache_fresh(cache_path):
                 htmls = json.loads(cache_path.read_text(encoding="utf-8"))
-                self._search_html_cache[cache_key] = list(htmls)
-                return list(htmls)
+                if self._cached_search_results_satisfy_target(
+                    htmls,
+                    target_profile_count=target_profile_count,
+                    existing_account_ids=existing_account_ids,
+                ):
+                    self._search_html_cache[cache_key] = list(htmls)
+                    return list(htmls)
+                self.safe_mode_controller.log_fn(
+                    "safe-mode: cached homefeed below target; refreshing"
+                )
             self.safe_mode_controller.log_fn("safe-mode: disk cache expired for homefeed")
         htmls = self._load_search_result_htmls(
             source_url,
             scroll_rounds=self.search_scroll_rounds,
+            target_profile_count=target_profile_count,
+            existing_account_ids=existing_account_ids,
         )
         self._remember_active_search_results(cache_key, htmls)
         self._search_html_cache[cache_key] = list(htmls)
@@ -1418,6 +1533,30 @@ class PlaywrightCrawlerClient:
             )
             self.safe_mode_controller.log_fn("safe-mode: wrote homefeed cache to disk")
         return list(htmls)
+
+    def _cached_search_results_satisfy_target(
+        self,
+        htmls: list[str],
+        *,
+        target_profile_count: int | None,
+        existing_account_ids: tuple[str, ...],
+    ) -> bool:
+        target_count = max(int(target_profile_count or 0), 0)
+        if target_count <= 0:
+            return True
+        existing_ids = {
+            account_id.strip()
+            for account_id in existing_account_ids
+            if account_id.strip()
+        }
+        return (
+            self._count_new_search_result_profiles(
+                htmls,
+                target_profile_count=target_count,
+                existing_account_ids=existing_ids,
+            )
+            >= target_count
+        )
 
 
 def save_login_storage_state(

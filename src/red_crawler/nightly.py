@@ -41,7 +41,13 @@ class NightlyClient(Protocol):
 
     def fetch_search_result_htmls(self, query: str) -> list[str]: ...
 
-    def fetch_homefeed_result_htmls(self, source_url: str) -> list[str]: ...
+    def fetch_homefeed_result_htmls(
+        self,
+        source_url: str,
+        *,
+        target_profile_count: int | None = None,
+        existing_account_ids: tuple[str, ...] = (),
+    ) -> list[str]: ...
 
     def fetch_note_recommendation_html(self, profile_url: str) -> list[str]: ...
 
@@ -268,7 +274,11 @@ def collect_nightly_with_client(
     if not processed_search_terms and effective_crawl_budget > 0:
         homefeed_term = f"homefeed:{config.homefeed_url}"
         try:
-            html_snapshots = client.fetch_homefeed_result_htmls(config.homefeed_url)
+            html_snapshots = client.fetch_homefeed_result_htmls(
+                config.homefeed_url,
+                target_profile_count=effective_crawl_budget,
+                existing_account_ids=tuple(sorted(store.list_creator_account_ids())),
+            )
         except RiskControlTriggered as exc:
             aborted = True
             abort_reason = str(exc)

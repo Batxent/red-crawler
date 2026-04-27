@@ -29,7 +29,13 @@ class FakeNightlyClient:
             return [payload]
         return payload
 
-    def fetch_homefeed_result_htmls(self, source_url):
+    def fetch_homefeed_result_htmls(
+        self,
+        source_url,
+        *,
+        target_profile_count=None,
+        existing_account_ids=(),
+    ):
         payload = self.search_pages.get(f"homefeed:{source_url}", [])
         if isinstance(payload, str):
             return [payload]

@@ -73,6 +73,7 @@ class RunReport:
     aborted: bool = False
     abort_reason: Optional[str] = None
     errors: List[Dict[str, str]] = field(default_factory=list)
+    diagnostics: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

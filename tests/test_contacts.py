@@ -86,6 +86,28 @@ def test_extract_contact_leads_recovers_homoglyph_domain_email():
     assert emails[0].raw_snippet == "yay@shuge.cn"
 
 
+def test_extract_contact_leads_backfills_username_from_provider_domain():
+    bio = "我是生活的主人🐰 𝘩𝘦𝘯𝘨𝘢𝘰𝘹𝘪𝘯𝘨𝟶𝟸𝟶𝟺🌀𝘧𝘰𝘹𝘮𝘢𝘪𝘭.𝘤𝘰𝘮"
+
+    leads = extract_contact_leads(account_id="user-025", bio_text=bio)
+    emails = [lead for lead in leads if lead.lead_type == "email"]
+
+    assert len(emails) == 1
+    assert emails[0].normalized_value == "hengaoxing0204@foxmail.com"
+    assert emails[0].raw_snippet == "hengaoxing0204foxmail.com"
+    assert [lead for lead in leads if lead.lead_type == "wechat"] == []
+
+
+def test_extract_contact_leads_backfills_spaced_provider_domain_email():
+    bio = "画点自己喜欢的妆🎨 kosokuya🌀 𝟙𝟚𝟞.com"
+
+    leads = extract_contact_leads(account_id="user-026", bio_text=bio)
+    emails = [lead for lead in leads if lead.lead_type == "email"]
+
+    assert len(emails) == 1
+    assert emails[0].normalized_value == "kosokuya@126.com"
+
+
 def test_extract_contact_leads_normalizes_broad_ascii_homoglyph_email():
     bio = "аƅсԁеғɡһіјκⅼмոорԛгѕтυνԝхуᴢ@ехаmрⅼе.сո"
 

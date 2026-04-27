@@ -36,7 +36,13 @@ class CrawlClient(Protocol):
 
     def fetch_search_result_htmls(self, query: str) -> list[str]: ...
 
-    def fetch_homefeed_result_htmls(self, source_url: str) -> list[str]: ...
+    def fetch_homefeed_result_htmls(
+        self,
+        source_url: str,
+        *,
+        target_profile_count: int | None = None,
+        existing_account_ids: tuple[str, ...] = (),
+    ) -> list[str]: ...
 
 
 @dataclass
@@ -302,7 +308,11 @@ def run_crawl_homefeed_with_client(
     }
 
     try:
-        html_snapshots = client.fetch_homefeed_result_htmls(config.homefeed_url)
+        html_snapshots = client.fetch_homefeed_result_htmls(
+            config.homefeed_url,
+            target_profile_count=config.max_accounts,
+            existing_account_ids=tuple(sorted(existing_account_ids)),
+        )
     except RiskControlTriggered as exc:
         aborted = True
         abort_reason = str(exc)
@@ -310,6 +320,9 @@ def run_crawl_homefeed_with_client(
         html_snapshots = []
 
     candidates: list[dict[str, object]] = []
+    raw_candidate_count = 0
+    skipped_existing_count = 0
+    skipped_duplicate_count = 0
     for html in html_snapshots:
         if len(candidates) >= config.max_accounts:
             break
@@ -317,24 +330,33 @@ def run_crawl_homefeed_with_client(
             html=html,
             max_results=max(config.max_accounts * 5, config.max_accounts),
         ):
+            raw_candidate_count += 1
             account_id = str(candidate.get("account_id", "")).strip()
             if account_id in existing_account_ids:
+                skipped_existing_count += 1
                 continue
             candidate_key = build_profile_dedupe_key(
                 candidate["profile_url"],
                 account_id,
             )
             if candidate_key in queued_keys:
+                skipped_duplicate_count += 1
                 continue
             queued_keys.add(candidate_key)
             candidates.append(candidate)
             if len(candidates) >= config.max_accounts:
                 break
 
+    filtered_non_creator_count = 0
+    filtered_min_followers_count = 0
+    filtered_relevance_count = 0
+    filtered_gender_count = 0
+    fetched_profile_count = 0
     for candidate in candidates:
         profile_url = str(candidate["profile_url"])
         try:
             html = client.fetch_profile_html(profile_url)
+            fetched_profile_count += 1
             account = parse_profile_html(
                 html=html,
                 profile_url=profile_url,
@@ -356,19 +378,24 @@ def run_crawl_homefeed_with_client(
                 str(account.visible_metadata.get("followers", ""))
             )
             if config.creator_only and account.creator_segment != "creator":
+                filtered_non_creator_count += 1
                 continue
             if follower_count < max(config.min_followers, 0):
+                filtered_min_followers_count += 1
                 continue
             if account.relevance_score < config.min_relevance_score:
+                filtered_relevance_count += 1
                 continue
-            if _matches_gender_filter(account, gender_filter):
-                accounts.append(account)
-                contact_leads.extend(
-                    extract_contact_leads(
-                        account_id=account.account_id,
-                        bio_text=account.bio_text,
-                    )
+            if not _matches_gender_filter(account, gender_filter):
+                filtered_gender_count += 1
+                continue
+            accounts.append(account)
+            contact_leads.extend(
+                extract_contact_leads(
+                    account_id=account.account_id,
+                    bio_text=account.bio_text,
                 )
+            )
         except RiskControlTriggered as exc:
             aborted = True
             abort_reason = str(exc)
@@ -400,6 +427,18 @@ def run_crawl_homefeed_with_client(
             aborted=aborted,
             abort_reason=abort_reason,
             errors=errors,
+            diagnostics={
+                "homefeed_html_snapshots": len(html_snapshots),
+                "homefeed_raw_candidate_occurrences": raw_candidate_count,
+                "homefeed_skipped_existing_accounts": skipped_existing_count,
+                "homefeed_skipped_duplicate_candidates": skipped_duplicate_count,
+                "homefeed_queued_candidates": len(candidates),
+                "homefeed_fetched_profiles": fetched_profile_count,
+                "homefeed_filtered_non_creator": filtered_non_creator_count,
+                "homefeed_filtered_min_followers": filtered_min_followers_count,
+                "homefeed_filtered_relevance": filtered_relevance_count,
+                "homefeed_filtered_gender": filtered_gender_count,
+            },
         ),
     )
 
