@@ -67,7 +67,7 @@ def test_skill_metadata_contract_matches_runtime():
     assert "report_dir: ./reports" in CONFIG_EXAMPLE_TEXT
     assert "output_dir: ./output" in CONFIG_EXAMPLE_TEXT
     assert "cache_dir: ./.cache/red-crawler" in CONFIG_EXAMPLE_TEXT
-    assert "homefeed_url: https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3" in CONFIG_EXAMPLE_TEXT
+    assert "homefeed_url: https://www.xiaohongshu.com/explore?channel_id=homefeed.fashion_v3" in CONFIG_EXAMPLE_TEXT
     assert "browser_mode: local" in CONFIG_EXAMPLE_TEXT
     assert "proxy:" in CONFIG_EXAMPLE_TEXT
     assert "proxy_list:" in CONFIG_EXAMPLE_TEXT

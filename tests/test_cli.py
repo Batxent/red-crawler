@@ -508,7 +508,7 @@ def test_cli_crawl_homefeed_does_not_require_storage_state(tmp_path, monkeypatch
 
     assert exit_code == 0
     assert captured["homefeed_url"] == (
-        "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3"
+        "https://www.xiaohongshu.com/explore?channel_id=homefeed.fashion_v3"
     )
     assert captured["storage_state"] == ""
     assert captured["max_accounts"] == 8
@@ -624,7 +624,7 @@ def test_cli_collect_nightly_runs_worker(tmp_path, monkeypatch):
         "daily_search_term_budget": 3,
         "startup_jitter_minutes": 25,
         "slot_name": "morning",
-        "homefeed_url": "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3",
+        "homefeed_url": "https://www.xiaohongshu.com/explore?channel_id=homefeed.fashion_v3",
         "interaction_mode": "os-mouse",
     }
 
@@ -669,7 +669,7 @@ def test_cli_crawl_discover_runs_worker_without_seed_url(tmp_path, monkeypatch):
         "report_dir": str(tmp_path / "reports"),
         "crawl_budget": 6,
         "search_term_limit": 1,
-        "homefeed_url": "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3",
+        "homefeed_url": "https://www.xiaohongshu.com/explore?channel_id=homefeed.fashion_v3",
         "interaction_mode": "os-mouse",
     }
 

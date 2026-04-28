@@ -303,8 +303,8 @@ def run_crawl_homefeed_with_client(
         if account_id.strip()
     }
     source_payload: Dict[str, object] = {
-        "bio_text": "彩妆博主",
-        "visible_metadata": {"tags": ["彩妆", "美妆"]},
+        "bio_text": "穿搭时尚",
+        "visible_metadata": {"tags": ["穿搭", "时尚"]},
     }
 
     try:

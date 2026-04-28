@@ -681,10 +681,16 @@ def test_classify_high_risk_page_detects_verification_and_login_expiry():
     assert classify_high_risk_page("正常的主页内容") is None
 
 
-def test_classify_high_risk_url_detects_website_login_captcha():
+def test_classify_high_risk_url_detects_login_redirects():
     assert (
         classify_high_risk_url(
             "https://www.xiaohongshu.com/website-login/captcha?verifyType=124"
+        )
+        == "login_required"
+    )
+    assert (
+        classify_high_risk_url(
+            "https://www.xiaohongshu.com/login?redirectPath=http%3A%2F%2Fwww.xiaohongshu.com%2Fuser%2Fprofile%2F5e6df092000000000100710c%3Fchannel_type%3Dexplore_feed%26parent_page_channel_type%3Dweb_profile_board%26xsec_token%3DAB6-zREkIrfitHsPNXSbPj8SZrijyUHFHz1v-YAl4WAKA%3D%26xsec_source%3Dpc_feed%26exSource%3Dnull"
         )
         == "login_required"
     )

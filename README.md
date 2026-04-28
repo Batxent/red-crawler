@@ -1,6 +1,6 @@
 ﻿# red-crawler
 
-CLI crawler for collecting Xiaohongshu beauty creator contact leads from profile bios and recommendation chains, with SQLite persistence and nightly automation.
+CLI crawler for collecting Xiaohongshu creator contact leads from profile bios and recommendation chains, with SQLite persistence and nightly automation.
 
 ## Usage
 
@@ -25,7 +25,7 @@ uv run playwright install chromium
 
 Run without logging in. If Xiaohongshu shows a login popup, the crawler tries to close it and continue.
 
-Collect creators from the Xiaohongshu cosmetics homefeed:
+Collect creators from the Xiaohongshu fashion homefeed:
 
 ```bash
 red-crawler crawl-homefeed \
@@ -34,7 +34,7 @@ red-crawler crawl-homefeed \
   --output-dir "./output"
 ```
 
-The default homefeed URL is `https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3`. The crawler reads each card's author link and opens the user profile, not the note page.
+The default homefeed URL is `https://www.xiaohongshu.com/explore?channel_id=homefeed.fashion_v3`. The crawler reads each card's author link and opens the user profile, not the note page.
 
 Run a manual crawl from a known user profile:
 
@@ -189,7 +189,7 @@ To install it from a local path, point OpenClaw at that folder, or copy the skil
 Use the OpenClaw skill actions in this order:
 
 - `bootstrap` validates a local working directory and can run Chromium installation when explicitly requested.
-- `crawl_homefeed` collects from the default cosmetics homefeed without requiring login.
+- `crawl_homefeed` collects from the default fashion homefeed without requiring login.
 - `login` creates an optional Playwright storage state explicitly.
 - `crawl_seed` and `collect_nightly` can run without `--storage-state`; pass one only when you want to reuse an authenticated session.
 - `report_weekly` and `list_contactable` run from the SQLite database and do not require `--storage-state`.

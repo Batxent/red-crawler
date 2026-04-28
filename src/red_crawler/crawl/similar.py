@@ -28,6 +28,26 @@ TOPIC_QUERY_HINTS = (
     ("敏感肌", "敏感肌护肤"),
     ("油痘肌", "油痘肌护肤"),
 )
+BIO_PRIORITY_HINTS = (
+    "身高体重",
+    "苹果型",
+    "梨形",
+    "H型",
+    "邮箱号",
+    "合",
+    "分享",
+    "穿搭",
+    "模特",
+    "小个子",
+    "高个子",
+    "身材",
+    "时尚",
+    "种草",
+    "喜欢您来",
+    "风格",
+    "日常",
+    "📪",
+)
 STUDIO_HINTS = ("工作室", "机构", "官方", "品牌", "公司", "团队", "MCN")
 PRO_ARTIST_HINTS = ("化妆师", "彩妆师", "makeup artist", "Makeup Artist")
 CREATOR_HINTS = DOMAIN_HINTS + ("博主", "分享", "教程")
@@ -84,7 +104,10 @@ def extract_search_result_profiles(
     seen = set()
     results: List[Dict[str, str]] = []
 
-    for anchor in soup.select(".card-bottom-wrapper a.author[href*='/user/profile/']"):
+    for anchor in soup.select(
+        ".card-bottom-wrapper a.author[href*='/user/profile/'], "
+        ".note-item a.author[href*='/user/profile/']"
+    ):
         href = anchor.get("href", "").strip()
         if not href:
             continue
@@ -250,6 +273,7 @@ def score_creator_relevance(
     candidate_followers = parse_follower_count(str(candidate_meta.get("followers", "")))
     candidate_text = _account_text(candidate_account)
     segment = classify_creator_segment(candidate_account)
+    has_bio_priority_hint = _has_bio_priority_hint(candidate_text)
     score = 0.0
 
     matched_cluster = _matched_cluster(seed_account)
@@ -257,7 +281,9 @@ def score_creator_relevance(
         score += 0.25 if "博主" in candidate_text else 0.0
     else:
         cluster_hints = DOMAIN_CLUSTERS[matched_cluster]
-        if any(hint in candidate_text for hint in cluster_hints):
+        if any(hint in candidate_text for hint in cluster_hints) or (
+            matched_cluster == "fashion" and has_bio_priority_hint
+        ):
             score += 0.55
         else:
             return 0.0
@@ -277,8 +303,14 @@ def score_creator_relevance(
         score += 0.08
     elif segment == "studio":
         score -= 0.12
+    elif matched_cluster == "fashion" and has_bio_priority_hint:
+        score += 0.17
 
     return round(max(0.0, min(score, 1.0)), 2)
+
+
+def _has_bio_priority_hint(text: str) -> bool:
+    return any(hint in text for hint in BIO_PRIORITY_HINTS)
 
 
 def is_relevant_creator_candidate(

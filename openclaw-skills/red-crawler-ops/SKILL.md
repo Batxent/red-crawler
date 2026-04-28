@@ -14,7 +14,7 @@ Use this skill when you need to operate the installed `red-crawler` CLI from an 
 Use `red-crawler-ops` for:
 
 - preparing a local working directory for `red-crawler`
-- crawling the default Xiaohongshu cosmetics homefeed
+- crawling the default Xiaohongshu fashion homefeed
 - saving a login session into Playwright storage state
 - crawling a seed Xiaohongshu profile
 - running nightly collection against a workspace database
@@ -27,11 +27,11 @@ All crawling tasks must use the native `red-crawler` CLI commands:
 
 ### 1. crawl-homefeed (default)
 
-Collect users from the Xiaohongshu cosmetics homefeed. This is the default crawl mode when `action` is omitted. It clicks card author links, not note links.
+Collect users from the Xiaohongshu fashion homefeed. This is the default crawl mode when `action` is omitted. It clicks card author links, not note links.
 
 ```bash
 red-crawler crawl-homefeed \
-  --homefeed-url "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3" \
+  --homefeed-url "https://www.xiaohongshu.com/explore?channel_id=homefeed.fashion_v3" \
   --max-accounts 20 \
   --db-path "./data/red_crawler.db" \
   --output-dir "./output"

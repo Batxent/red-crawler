@@ -107,6 +107,46 @@ def test_extract_search_result_profiles_extracts_authors_from_search_cards():
     ]
 
 
+def test_extract_search_result_profiles_extracts_homefeed_author_links():
+    html = """
+    <html>
+      <body>
+        <section class="feeds-page">
+          <div class="feeds-container">
+            <div class="note-item">
+              <a class="cover" href="/explore/note-010">note</a>
+              <a class="author" href="/user/profile/user-010?xsec_source=pc_feed">美妆博主A</a>
+            </div>
+            <div class="note-item">
+              <a class="author" href="/user/profile/user-011?xsec_source=pc_feed">美妆博主B</a>
+            </div>
+          </div>
+        </section>
+      </body>
+    </html>
+    """
+
+    from red_crawler.crawl.similar import extract_search_result_profiles
+
+    profiles = extract_search_result_profiles(
+        html=html,
+        max_results=5,
+    )
+
+    assert profiles == [
+        {
+            "account_id": "user-010",
+            "profile_url": "https://www.xiaohongshu.com/user/profile/user-010?xsec_source=pc_feed",
+            "nickname": "美妆博主A",
+        },
+        {
+            "account_id": "user-011",
+            "profile_url": "https://www.xiaohongshu.com/user/profile/user-011?xsec_source=pc_feed",
+            "nickname": "美妆博主B",
+        },
+    ]
+
+
 def test_extract_search_result_profiles_dedupes_same_user_across_url_variants():
     html = """
     <html>
@@ -193,6 +233,48 @@ def test_build_search_queries_adds_seed_specific_topic_terms():
         "抗痘博主",
         "痘肌护肤",
     ]
+
+
+def test_bio_priority_hints_include_requested_profile_terms():
+    from red_crawler.crawl.similar import BIO_PRIORITY_HINTS
+
+    assert set(
+        [
+            "身高体重",
+            "苹果型",
+            "梨形",
+            "H型",
+            "邮箱号",
+            "合",
+            "分享",
+            "穿搭",
+            "模特",
+            "小个子",
+            "高个子",
+            "身材",
+            "时尚",
+            "种草",
+            "喜欢您来",
+            "风格",
+            "日常",
+            "📪",
+        ]
+    ).issubset(BIO_PRIORITY_HINTS)
+
+
+def test_score_creator_relevance_prioritizes_fashion_bio_hints():
+    from red_crawler.crawl.similar import score_creator_relevance
+
+    seed_account = {
+        "bio_text": "穿搭时尚",
+        "visible_metadata": {"tags": ["穿搭", "时尚"]},
+    }
+    candidate_account = {
+        "bio_text": "小个子梨形身材 日常风格 📪",
+        "visible_metadata": {"tags": [], "followers": "0"},
+    }
+
+    assert score_creator_relevance(seed_account, candidate_account) >= 0.7
 
 
 def test_score_creator_relevance_penalizes_studio_accounts():

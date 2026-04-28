@@ -72,7 +72,7 @@ BACK_BUTTON_SELECTORS = (
 )
 SEARCH_RESULT_CARD_SELECTOR = ".card-bottom-wrapper a.author[href*='/user/profile/']"
 DEFAULT_COSMETICS_HOMEFEED_URL = (
-    "https://www.xiaohongshu.com/explore?channel_id=homefeed.cosmetics_v3"
+    "https://www.xiaohongshu.com/explore?channel_id=homefeed.fashion_v3"
 )
 LOGIN_DIALOG_CLOSE_SELECTORS = (
     "button[aria-label='关闭']",
@@ -252,7 +252,11 @@ def classify_high_risk_page(body_text: str) -> str | None:
 
 
 def classify_high_risk_url(url: str) -> str | None:
-    if "/website-login/captcha" in url:
+    parsed = urlparse(url)
+    if parsed.netloc.endswith("xiaohongshu.com") and parsed.path.rstrip("/") in {
+        "/login",
+        "/website-login/captcha",
+    }:
         return "login_required"
     return None
 
