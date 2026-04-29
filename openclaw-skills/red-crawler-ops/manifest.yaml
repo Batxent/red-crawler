@@ -35,6 +35,14 @@ config:
     type: string
     default: ./.cache/red-crawler
     description: Directory for crawler cache files.
+  heartbeat_dir:
+    type: string
+    default: ./.openclaw/red-crawler
+    description: Directory where background jobs write HEARTBEAT.md, job state, and events.
+  job_log_dir:
+    type: string
+    default: ./logs/jobs
+    description: Directory where background job stdout and stderr logs are written.
   runner_command:
     type: [string, array]
     default: red-crawler
@@ -70,6 +78,27 @@ input_schema:
         - collect_nightly
         - report_weekly
         - list_contactable
+        - job_status
+        - job_logs
+        - job_stop
+        - ack_event
+    run_mode:
+      type: string
+      default: sync
+      enum:
+        - sync
+        - background
+      description: Use background for long crawl actions so OpenClaw can return before the crawl finishes.
+    job_id:
+      type: string
+    event_id:
+      type: string
+    heartbeat_dir:
+      type: string
+    job_log_dir:
+      type: string
+    tail_lines:
+      type: integer
     workspace_path:
       type: string
     runner_command:
@@ -151,9 +180,19 @@ output_schema:
   properties:
     status:
       type: string
-      enum: [success, error]
+      enum: [success, error, accepted]
     action:
       type: string
+    run_mode:
+      type: string
+    job_id:
+      type: string
+    event_id:
+      type: string
+    pid:
+      type: integer
+    job:
+      type: object
     command:
       type: string
     summary:

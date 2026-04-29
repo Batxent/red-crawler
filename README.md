@@ -194,6 +194,8 @@ Use the OpenClaw skill actions in this order:
 - `crawl_seed` and `collect_nightly` can run without `--storage-state`; pass one only when you want to reuse an authenticated session.
 - `report_weekly` and `list_contactable` run from the SQLite database and do not require `--storage-state`.
 
+For long crawls, pass `run_mode: background`. The skill returns a `job_id` immediately, writes job state under `./.openclaw/red-crawler`, and maintains `HEARTBEAT.md` for OpenClaw heartbeat polling. Use `job_status`, `job_logs`, or `job_stop` with the returned `job_id` for manual follow-up. After OpenClaw reports a pending heartbeat event to the user, call `ack_event` with its `event_id` to avoid duplicate notifications.
+
 The skill does not clone repositories or create login sessions implicitly. Install the `red-crawler` CLI package first, point `workspace_path` at a local working directory, and run `bootstrap` only for reviewed local setup steps.
 
 ## Publishing

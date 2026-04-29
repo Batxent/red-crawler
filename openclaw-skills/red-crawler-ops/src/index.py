@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import json
+import os
+import signal
 import shlex
 import subprocess
+import sys
 import tomllib
-from pathlib import Path
 from collections.abc import Sequence
+from datetime import datetime, timezone
+from pathlib import Path
+from uuid import uuid4
 
 
 KNOWN_ACTIONS = {
@@ -15,7 +21,13 @@ KNOWN_ACTIONS = {
     "collect_nightly",
     "report_weekly",
     "list_contactable",
+    "job_status",
+    "job_logs",
+    "job_stop",
+    "ack_event",
 }
+
+BACKGROUND_ACTIONS = {"crawl_seed", "crawl_homefeed", "collect_nightly"}
 
 EXPECTED_ARTIFACTS = {
     "crawl_seed": ("accounts.csv", "contact_leads.csv", "run_report.json"),
@@ -46,6 +58,9 @@ CLI_ARTIFACT_DEFAULTS = {
 
 EXPECTED_PROJECT_NAME = "red-crawler"
 DEFAULT_ACTION = "crawl_homefeed"
+DEFAULT_HEARTBEAT_DIR = ".openclaw/red-crawler"
+DEFAULT_LOG_DIR = "logs/jobs"
+JOB_SCHEMA_VERSION = 1
 
 
 def extract_config(context):
@@ -86,6 +101,37 @@ def structured_error(error_type, message, suggested_fix):
 
 def _display_command(argv):
     return shlex.join(str(part) for part in argv)
+
+
+def _utc_now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _safe_slug(value):
+    allowed = []
+    for char in str(value):
+        if char.isalnum() or char in {"-", "_"}:
+            allowed.append(char)
+        else:
+            allowed.append("_")
+    return "".join(allowed).strip("_")
+
+
+def _read_json(path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _write_json(path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    tmp_path.replace(path)
 
 
 def _get_runner_command(resolved):
@@ -231,6 +277,209 @@ def run_command(argv, cwd):
     return subprocess.run(argv, cwd=cwd, capture_output=True, text=True)
 
 
+def _tail_file(path, max_lines):
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    if max_lines is not None and max_lines > 0:
+        lines = lines[-max_lines:]
+    return "\n".join(lines)
+
+
+def _start_background_job(command, command_display, normalized_action, resolved):
+    job_id = resolved.get("job_id") or _make_job_id(normalized_action)
+    now = _utc_now()
+    logs = _log_dir(resolved)
+    logs.mkdir(parents=True, exist_ok=True)
+    stdout_path = logs / f"{_safe_slug(job_id)}.out.log"
+    stderr_path = logs / f"{_safe_slug(job_id)}.err.log"
+    job = {
+        "schema_version": JOB_SCHEMA_VERSION,
+        "job_id": job_id,
+        "action": normalized_action,
+        "status": "accepted",
+        "command": command_display,
+        "argv": [str(part) for part in command],
+        "workspace_path": str(_workspace_root(resolved)),
+        "stdout_log": str(stdout_path),
+        "stderr_log": str(stderr_path),
+        "created_at": now,
+        "updated_at": now,
+        "started_at": None,
+        "finished_at": None,
+        "returncode": None,
+        "summary": f"{normalized_action} accepted as background job.",
+        "artifacts": {},
+        "missing_artifacts": [],
+        "resolved": resolved,
+    }
+    path = _job_path(resolved, job_id)
+    _write_json(path, job)
+    _write_heartbeat(resolved)
+
+    wrapper_command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--run-job",
+        str(path),
+    ]
+    try:
+        with stdout_path.open("a", encoding="utf-8") as stdout_handle, stderr_path.open(
+            "a", encoding="utf-8"
+        ) as stderr_handle:
+            process = subprocess.Popen(
+                wrapper_command,
+                cwd=_workspace_root(resolved),
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                start_new_session=True,
+            )
+    except OSError as exc:
+        job["status"] = "failed"
+        job["error_type"] = "execution_error"
+        job["message"] = f"{normalized_action} background job failed to start: {exc}."
+        job["summary"] = job["message"]
+        job["finished_at"] = _utc_now()
+        job["updated_at"] = job["finished_at"]
+        _write_json(path, job)
+        _append_event(resolved, job_id, "error", job["summary"])
+        _write_heartbeat(resolved)
+        return {
+            "status": "error",
+            "action": normalized_action,
+            "error_type": "execution_error",
+            "message": job["message"],
+            "command": command_display,
+            "stdout": "",
+            "stderr": "",
+            "suggested_fix": (
+                "Verify the Python runtime can launch the background job wrapper, "
+                "then rerun the action."
+            ),
+        }
+
+    job["status"] = "running"
+    job["wrapper_pid"] = process.pid
+    job["updated_at"] = _utc_now()
+    _write_json(path, job)
+    _write_heartbeat(resolved)
+    return {
+        "status": "accepted",
+        "action": normalized_action,
+        "run_mode": "background",
+        "job_id": job_id,
+        "pid": process.pid,
+        "command": command_display,
+        "artifacts": {
+            "job": str(path),
+            "heartbeat": str(_heartbeat_path(resolved)),
+            "stdout_log": str(stdout_path),
+            "stderr_log": str(stderr_path),
+        },
+        "summary": f"{normalized_action} is running in the background.",
+        "next_step": "Use action=job_status with this job_id, or let OpenClaw heartbeat read HEARTBEAT.md.",
+        "stdout": "",
+        "stderr": "",
+    }
+
+
+def _run_job_file(job_path):
+    path = Path(job_path)
+    job = _read_json(path)
+    if not isinstance(job, dict):
+        return 2
+
+    resolved = dict(job.get("resolved") or {})
+    action = str(job.get("action", "")).strip().lower()
+    job_id = job.get("job_id")
+    now = _utc_now()
+    job.update(
+        {
+            "status": "running",
+            "started_at": job.get("started_at") or now,
+            "updated_at": now,
+            "wrapper_pid": os.getpid(),
+        }
+    )
+    _write_json(path, job)
+    _write_heartbeat(resolved)
+
+    stdout_path = Path(job["stdout_log"])
+    stderr_path = Path(job["stderr_log"])
+    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    stderr_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with stdout_path.open("a", encoding="utf-8") as stdout_handle, stderr_path.open(
+            "a", encoding="utf-8"
+        ) as stderr_handle:
+            process = subprocess.Popen(
+                job["argv"],
+                cwd=job["workspace_path"],
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                text=True,
+            )
+            job["process_pid"] = process.pid
+            job["updated_at"] = _utc_now()
+            _write_json(path, job)
+            _write_heartbeat(resolved)
+            returncode = process.wait()
+    except OSError as exc:
+        finished_at = _utc_now()
+        job.update(
+            {
+                "status": "failed",
+                "returncode": None,
+                "finished_at": finished_at,
+                "updated_at": finished_at,
+                "error_type": "execution_error",
+                "message": f"{action} failed to start: {exc}.",
+                "summary": f"{action} failed to start: {exc}.",
+            }
+        )
+        _write_json(path, job)
+        _append_event(resolved, job_id, "error", job["summary"])
+        _write_heartbeat(resolved)
+        return 1
+
+    artifacts, missing_artifacts = _collect_artifacts(action, resolved)
+    finished_at = _utc_now()
+    job.update(
+        {
+            "returncode": returncode,
+            "finished_at": finished_at,
+            "updated_at": finished_at,
+            "artifacts": artifacts,
+            "missing_artifacts": missing_artifacts,
+        }
+    )
+    if returncode != 0:
+        job["status"] = "failed"
+        job["error_type"] = "execution_error"
+        job["message"] = f"{action} failed with exit code {returncode}."
+        job["summary"] = job["message"]
+        _append_event(resolved, job_id, "error", job["summary"])
+    elif missing_artifacts:
+        job["status"] = "failed"
+        job["error_type"] = "artifact_error"
+        job["message"] = (
+            f"{action} completed but missing required artifacts: "
+            f"{', '.join(missing_artifacts)}."
+        )
+        job["summary"] = job["message"]
+        _append_event(resolved, job_id, "error", job["summary"])
+    else:
+        job["status"] = "succeeded"
+        job["summary"] = f"{action} completed successfully."
+        _append_event(resolved, job_id, "info", job["summary"])
+
+    _write_json(path, job)
+    _write_heartbeat(resolved)
+    return 0 if job["status"] == "succeeded" else 1
+
+
 def _workspace_root(resolved):
     return Path(resolved["workspace_path"])
 
@@ -266,6 +515,160 @@ def _resolve_artifact_dir(path_value, resolved):
         return base / default_dir
 
     return _resolve_workspace_path_value(path_value, resolved)
+
+
+def _heartbeat_root(resolved):
+    return _resolve_workspace_path_value(
+        resolved.get("heartbeat_dir") or DEFAULT_HEARTBEAT_DIR,
+        resolved,
+    )
+
+
+def _job_dir(resolved):
+    return _heartbeat_root(resolved) / "jobs"
+
+
+def _event_dir(resolved):
+    return _heartbeat_root(resolved) / "events"
+
+
+def _ack_dir(resolved):
+    return _heartbeat_root(resolved) / "acks"
+
+
+def _log_dir(resolved):
+    return _resolve_workspace_path_value(
+        resolved.get("job_log_dir") or DEFAULT_LOG_DIR,
+        resolved,
+    )
+
+
+def _job_path(resolved, job_id):
+    return _job_dir(resolved) / f"{_safe_slug(job_id)}.json"
+
+
+def _event_path(resolved, job_id):
+    return _event_dir(resolved) / f"{_safe_slug(job_id)}.jsonl"
+
+
+def _heartbeat_path(resolved):
+    return _heartbeat_root(resolved) / "HEARTBEAT.md"
+
+
+def _make_job_id(action):
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return f"{_safe_slug(action)}_{timestamp}_{uuid4().hex[:8]}"
+
+
+def _job_paths_for_workspace(resolved):
+    root = _job_dir(resolved)
+    if not root.exists():
+        return []
+    return sorted(root.glob("*.json"))
+
+
+def _load_job(resolved, job_id):
+    path = _job_path(resolved, job_id)
+    if not path.exists():
+        return None
+    return _read_json(path)
+
+
+def _append_event(resolved, job_id, level, message):
+    event = {
+        "event_id": f"evt_{uuid4().hex}",
+        "job_id": job_id,
+        "level": level,
+        "message": message,
+        "created_at": _utc_now(),
+    }
+    path = _event_path(resolved, job_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+    return event
+
+
+def _iter_events(resolved):
+    root = _event_dir(resolved)
+    if not root.exists():
+        return []
+    events = []
+    for path in sorted(root.glob("*.jsonl")):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, dict):
+                events.append(event)
+    return events
+
+
+def _pending_events(resolved):
+    acks = _ack_dir(resolved)
+    pending = []
+    for event in _iter_events(resolved):
+        event_id = event.get("event_id")
+        if event_id and not (acks / f"{_safe_slug(event_id)}.ack").exists():
+            pending.append(event)
+    return pending
+
+
+def _render_heartbeat(resolved):
+    jobs = []
+    for path in _job_paths_for_workspace(resolved):
+        job = _read_json(path)
+        if isinstance(job, dict):
+            jobs.append(job)
+
+    active_jobs = [
+        job for job in jobs if job.get("status") in {"accepted", "running", "stopping"}
+    ]
+    pending_events = _pending_events(resolved)
+    lines = [
+        "# red-crawler heartbeat",
+        "",
+        "Active jobs:",
+    ]
+    if active_jobs:
+        for job in active_jobs:
+            summary = job.get("summary") or job.get("command") or ""
+            lines.append(
+                f"- {job.get('job_id')}: {job.get('status')}, "
+                f"last update {job.get('updated_at')}; {summary}"
+            )
+    else:
+        lines.append("- none")
+
+    lines.extend(["", "Pending user updates:"])
+    if pending_events:
+        for event in pending_events:
+            lines.extend(
+                [
+                    f"- event_id: {event.get('event_id')}",
+                    f"  job_id: {event.get('job_id')}",
+                    f"  level: {event.get('level')}",
+                    f"  message: {event.get('message')}",
+                ]
+            )
+    else:
+        lines.append("- none")
+
+    return "\n".join(lines) + "\n"
+
+
+def _write_heartbeat(resolved):
+    path = _heartbeat_path(resolved)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_render_heartbeat(resolved), encoding="utf-8")
+    return path
 
 
 def _artifact_root(action, resolved):
@@ -312,6 +715,33 @@ def validate_request(resolved):
             "validation_error",
             "seed_url is required for crawl_seed.",
             "Provide a valid Xiaohongshu seed profile URL.",
+        )
+
+    if action in {"job_status", "job_logs", "job_stop"} and not resolved.get("job_id"):
+        return structured_error(
+            "validation_error",
+            f"job_id is required for {action}.",
+            "Pass the job_id returned by a background crawl action.",
+        )
+    if action == "ack_event" and not resolved.get("event_id"):
+        return structured_error(
+            "validation_error",
+            "event_id is required for ack_event.",
+            "Pass the event_id from HEARTBEAT.md after notifying the user.",
+        )
+
+    run_mode = str(resolved.get("run_mode", "sync")).strip().lower()
+    if run_mode not in {"sync", "background"}:
+        return structured_error(
+            "validation_error",
+            f"Unsupported run_mode: {resolved.get('run_mode')}",
+            "Use run_mode: sync or run_mode: background.",
+        )
+    if run_mode == "background" and action not in BACKGROUND_ACTIONS:
+        return structured_error(
+            "validation_error",
+            f"run_mode: background is not supported for {action}.",
+            "Use background mode only with crawl_seed, crawl_homefeed, or collect_nightly.",
         )
 
     workspace_path = resolved.get("workspace_path")
@@ -438,6 +868,122 @@ def _bootstrap_result(resolved):
     }
 
 
+def _job_status_result(resolved):
+    job_id = resolved["job_id"]
+    job = _load_job(resolved, job_id)
+    if not isinstance(job, dict):
+        return structured_error(
+            "not_found",
+            f"job_id not found: {job_id}",
+            "Check the job_id returned by the background action and the workspace_path.",
+        )
+    heartbeat = _write_heartbeat(resolved)
+    return {
+        "status": "success",
+        "action": "job_status",
+        "job_id": job_id,
+        "job": job,
+        "artifacts": {
+            "job": str(_job_path(resolved, job_id)),
+            "heartbeat": str(heartbeat),
+            **dict(job.get("artifacts") or {}),
+        },
+        "summary": job.get("summary", ""),
+        "stdout": _tail_file(Path(job.get("stdout_log", "")), resolved.get("tail_lines", 80)),
+        "stderr": _tail_file(Path(job.get("stderr_log", "")), resolved.get("tail_lines", 80)),
+    }
+
+
+def _job_logs_result(resolved):
+    job_id = resolved["job_id"]
+    job = _load_job(resolved, job_id)
+    if not isinstance(job, dict):
+        return structured_error(
+            "not_found",
+            f"job_id not found: {job_id}",
+            "Check the job_id returned by the background action and the workspace_path.",
+        )
+    tail_lines = resolved.get("tail_lines", 120)
+    return {
+        "status": "success",
+        "action": "job_logs",
+        "job_id": job_id,
+        "summary": f"logs for {job_id}.",
+        "artifacts": {
+            "stdout_log": job.get("stdout_log", ""),
+            "stderr_log": job.get("stderr_log", ""),
+        },
+        "stdout": _tail_file(Path(job.get("stdout_log", "")), tail_lines),
+        "stderr": _tail_file(Path(job.get("stderr_log", "")), tail_lines),
+    }
+
+
+def _terminate_pid(pid):
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), signal.SIGTERM)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _job_stop_result(resolved):
+    job_id = resolved["job_id"]
+    job = _load_job(resolved, job_id)
+    if not isinstance(job, dict):
+        return structured_error(
+            "not_found",
+            f"job_id not found: {job_id}",
+            "Check the job_id returned by the background action and the workspace_path.",
+        )
+
+    stopped_process = _terminate_pid(job.get("process_pid"))
+    stopped_wrapper = _terminate_pid(job.get("wrapper_pid"))
+    now = _utc_now()
+    job["status"] = "stopping" if stopped_process or stopped_wrapper else job.get("status")
+    job["updated_at"] = now
+    if stopped_process or stopped_wrapper:
+        job["summary"] = f"stop requested for {job_id}."
+    else:
+        job["summary"] = f"no running process was found for {job_id}."
+    _write_json(_job_path(resolved, job_id), job)
+    _write_heartbeat(resolved)
+    return {
+        "status": "success",
+        "action": "job_stop",
+        "job_id": job_id,
+        "job": job,
+        "summary": job["summary"],
+        "artifacts": {
+            "job": str(_job_path(resolved, job_id)),
+            "heartbeat": str(_heartbeat_path(resolved)),
+        },
+        "stdout": "",
+        "stderr": "",
+    }
+
+
+def _ack_event_result(resolved):
+    event_id = resolved["event_id"]
+    ack_path = _ack_dir(resolved) / f"{_safe_slug(event_id)}.ack"
+    ack_path.parent.mkdir(parents=True, exist_ok=True)
+    ack_path.write_text(_utc_now() + "\n", encoding="utf-8")
+    heartbeat = _write_heartbeat(resolved)
+    return {
+        "status": "success",
+        "action": "ack_event",
+        "event_id": event_id,
+        "summary": f"acknowledged event {event_id}.",
+        "artifacts": {
+            "ack": str(ack_path),
+            "heartbeat": str(heartbeat),
+        },
+        "stdout": "",
+        "stderr": "",
+    }
+
+
 async def handler(input, context):
     resolved = merge_config(input, context or {})
     if isinstance(resolved, dict) and resolved.get("status") == "error":
@@ -451,8 +997,18 @@ async def handler(input, context):
     resolved["action"] = normalized_action
     if normalized_action == "bootstrap":
         return _bootstrap_result(resolved)
+    if normalized_action == "job_status":
+        return _job_status_result(resolved)
+    if normalized_action == "job_logs":
+        return _job_logs_result(resolved)
+    if normalized_action == "job_stop":
+        return _job_stop_result(resolved)
+    if normalized_action == "ack_event":
+        return _ack_event_result(resolved)
     command = build_command(resolved)
     command_display = _display_command(command)
+    if str(resolved.get("run_mode", "sync")).strip().lower() == "background":
+        return _start_background_job(command, command_display, normalized_action, resolved)
     try:
         completed = run_command(command, cwd=_workspace_root(resolved))
     except OSError as exc:
@@ -515,3 +1071,9 @@ async def handler(input, context):
         "stdout": completed.stdout,
         "stderr": completed.stderr,
     }
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--run-job":
+        raise SystemExit(_run_job_file(sys.argv[2]))
+    raise SystemExit("usage: index.py --run-job JOB_JSON")

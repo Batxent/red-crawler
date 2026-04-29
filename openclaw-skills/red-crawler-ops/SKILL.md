@@ -190,6 +190,23 @@ red-crawler open --storage-state "./state.json"
 - `collect_nightly`
 - `report_weekly`
 - `list_contactable`
+- `job_status`
+- `job_logs`
+- `job_stop`
+- `ack_event`
+
+## Long Running Crawls and Heartbeat
+
+For long crawl actions, set `run_mode: background`. The skill starts a local background wrapper, returns a `job_id` immediately, and writes OpenClaw-readable state under `heartbeat_dir` (default `./.openclaw/red-crawler`).
+
+Background jobs write:
+
+- `HEARTBEAT.md`: concise status and pending user updates for OpenClaw heartbeat polling
+- `jobs/<job_id>.json`: machine-readable job state
+- `events/<job_id>.jsonl`: completion or failure events
+- `logs/jobs/<job_id>.out.log` and `.err.log`: crawler logs
+
+Use `job_status` with the returned `job_id` to read the latest state manually. Use `job_logs` to inspect recent output and `job_stop` to request termination. If OpenClaw heartbeat polling is enabled, the agent can read `HEARTBEAT.md` and surface pending completion events to the user on a later heartbeat cycle. After surfacing an event, call `ack_event` with the `event_id` so the same update is not reported again.
 
 ## Example Prompts
 
@@ -295,6 +312,12 @@ Provide an object with `action` plus optional fields used by the selected action
 - `report_dir`
 - `output_dir`
 - `cache_dir`
+- `heartbeat_dir`
+- `job_log_dir`
+- `run_mode` (`sync`/`background`)
+- `job_id`
+- `event_id`
+- `tail_lines`
 
 Action-specific fields include:
 
@@ -340,6 +363,8 @@ Successful runs return:
 - `next_step`
 - `stdout`
 - `stderr`
+- `job_id` and `pid` when `run_mode: background` accepts a job
+- `job` for job status actions
 
 Error runs return:
 

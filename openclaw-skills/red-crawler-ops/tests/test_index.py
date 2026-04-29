@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import subprocess
 from pathlib import Path
 
@@ -13,6 +14,7 @@ INDEX_MODULE = importlib.util.module_from_spec(INDEX_SPEC)
 INDEX_SPEC.loader.exec_module(INDEX_MODULE)
 handler = INDEX_MODULE.handler
 build_command = INDEX_MODULE.build_command
+run_job_file = INDEX_MODULE._run_job_file
 SKILL_DIR = Path(__file__).resolve().parents[1]
 MANIFEST_TEXT = (SKILL_DIR / "manifest.yaml").read_text(encoding="utf-8")
 SKILL_TEXT = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
@@ -43,6 +45,8 @@ def test_skill_metadata_contract_matches_runtime():
     assert "default_list_limit:" in MANIFEST_TEXT
     assert "command:" in output_schema
     assert "summary:" in output_schema
+    assert "job_id:" in output_schema
+    assert "job:" in output_schema
     assert "artifacts:" in output_schema
     assert "stdout:" in output_schema
     assert "stderr:" in output_schema
@@ -67,6 +71,9 @@ def test_skill_metadata_contract_matches_runtime():
     assert "report_dir: ./reports" in CONFIG_EXAMPLE_TEXT
     assert "output_dir: ./output" in CONFIG_EXAMPLE_TEXT
     assert "cache_dir: ./.cache/red-crawler" in CONFIG_EXAMPLE_TEXT
+    assert "heartbeat_dir: ./.openclaw/red-crawler" in CONFIG_EXAMPLE_TEXT
+    assert "job_log_dir: ./logs/jobs" in CONFIG_EXAMPLE_TEXT
+    assert "run_mode: sync" in CONFIG_EXAMPLE_TEXT
     assert "homefeed_url: https://www.xiaohongshu.com/explore?channel_id=homefeed.fashion_v3" in CONFIG_EXAMPLE_TEXT
     assert "browser_mode: local" in CONFIG_EXAMPLE_TEXT
     assert "proxy:" in CONFIG_EXAMPLE_TEXT
@@ -94,6 +101,10 @@ def test_skill_docs_match_storage_state_behavior():
     assert "collect_nightly" in SKILL_TEXT
     assert "report_weekly" in SKILL_TEXT
     assert "list_contactable" in SKILL_TEXT
+    assert "run_mode: background" in SKILL_TEXT
+    assert "HEARTBEAT.md" in SKILL_TEXT
+    assert "job_status" in SKILL_TEXT
+    assert "ack_event" in SKILL_TEXT
     assert "execution-time failures" in SKILL_TEXT
     assert (
         "Early validation or configuration failures may omit `action`, `command`, "
@@ -110,6 +121,9 @@ def test_skill_docs_match_storage_state_behavior():
     assert "login` creates an optional Playwright storage state explicitly" in README_TEXT
     assert "crawl_seed` and `collect_nightly` can run without `--storage-state`" in README_TEXT
     assert "report_weekly` and `list_contactable` run from the SQLite database and do not require `--storage-state`" in README_TEXT
+    assert "run_mode: background" in README_TEXT
+    assert "HEARTBEAT.md" in README_TEXT
+    assert "ack_event" in README_TEXT
 
 
 def test_install_or_bootstrap_is_not_supported():
@@ -156,6 +170,168 @@ def test_handler_defaults_to_crawl_homefeed_when_action_is_omitted(
             "3",
         ]
     ]
+
+
+def test_background_crawl_returns_job_and_heartbeat(tmp_path, monkeypatch):
+    (tmp_path / "pyproject.toml").write_text(RED_CRAWLER_PYPROJECT, encoding="utf-8")
+    popen_calls = []
+
+    class FakePopen:
+        pid = 4321
+
+        def __init__(self, argv, **kwargs):
+            popen_calls.append((argv, kwargs))
+
+    monkeypatch.setattr(INDEX_MODULE.subprocess, "Popen", FakePopen)
+
+    result = run_handler(
+        {
+            "action": "crawl_homefeed",
+            "workspace_path": str(tmp_path),
+            "run_mode": "background",
+            "max_accounts": 3,
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "accepted"
+    assert result["run_mode"] == "background"
+    assert result["pid"] == 4321
+    assert result["job_id"].startswith("crawl_homefeed_")
+    assert len(popen_calls) == 1
+    assert popen_calls[0][0][1].endswith("index.py")
+    assert popen_calls[0][0][2] == "--run-job"
+
+    job_path = Path(result["artifacts"]["job"])
+    job = json.loads(job_path.read_text(encoding="utf-8"))
+    assert job["status"] == "running"
+    assert job["command"] == "red-crawler crawl-homefeed --max-accounts 3"
+    assert job["wrapper_pid"] == 4321
+
+    heartbeat = Path(result["artifacts"]["heartbeat"]).read_text(encoding="utf-8")
+    assert "# red-crawler heartbeat" in heartbeat
+    assert result["job_id"] in heartbeat
+    assert "Pending user updates:\n- none" in heartbeat
+
+
+def test_job_status_reads_job_and_tails_logs(tmp_path):
+    heartbeat_dir = tmp_path / ".openclaw" / "red-crawler"
+    job_dir = heartbeat_dir / "jobs"
+    log_dir = tmp_path / "logs" / "jobs"
+    job_dir.mkdir(parents=True)
+    log_dir.mkdir(parents=True)
+    stdout_log = log_dir / "job-1.out.log"
+    stderr_log = log_dir / "job-1.err.log"
+    stdout_log.write_text("one\ntwo\nthree\n", encoding="utf-8")
+    stderr_log.write_text("warn\n", encoding="utf-8")
+    job = {
+        "job_id": "job-1",
+        "action": "crawl_homefeed",
+        "status": "succeeded",
+        "summary": "crawl_homefeed completed successfully.",
+        "stdout_log": str(stdout_log),
+        "stderr_log": str(stderr_log),
+        "artifacts": {"accounts.csv": str(tmp_path / "output" / "accounts.csv")},
+    }
+    (job_dir / "job-1.json").write_text(json.dumps(job), encoding="utf-8")
+
+    result = run_handler(
+        {
+            "action": "job_status",
+            "workspace_path": str(tmp_path),
+            "job_id": "job-1",
+            "tail_lines": 2,
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "success"
+    assert result["action"] == "job_status"
+    assert result["job"]["status"] == "succeeded"
+    assert result["stdout"] == "two\nthree"
+    assert result["stderr"] == "warn"
+
+
+def test_run_job_file_writes_completion_event_and_heartbeat(tmp_path, monkeypatch):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "accounts.csv").write_text("id\n", encoding="utf-8")
+    (output_dir / "contact_leads.csv").write_text("id\n", encoding="utf-8")
+    (output_dir / "run_report.json").write_text("{}", encoding="utf-8")
+    resolved = {
+        "action": "crawl_homefeed",
+        "workspace_path": str(tmp_path),
+        "output_dir": str(output_dir),
+    }
+    heartbeat_dir = tmp_path / ".openclaw" / "red-crawler"
+    job_path = heartbeat_dir / "jobs" / "job-2.json"
+    job = {
+        "job_id": "job-2",
+        "action": "crawl_homefeed",
+        "status": "accepted",
+        "argv": ["red-crawler", "crawl-homefeed"],
+        "workspace_path": str(tmp_path),
+        "stdout_log": str(tmp_path / "logs" / "jobs" / "job-2.out.log"),
+        "stderr_log": str(tmp_path / "logs" / "jobs" / "job-2.err.log"),
+        "resolved": resolved,
+    }
+    job_path.parent.mkdir(parents=True)
+    job_path.write_text(json.dumps(job), encoding="utf-8")
+
+    class FakePopen:
+        pid = 9876
+
+        def __init__(self, argv, **kwargs):
+            self.argv = argv
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(INDEX_MODULE.subprocess, "Popen", FakePopen)
+
+    assert run_job_file(str(job_path)) == 0
+    updated = json.loads(job_path.read_text(encoding="utf-8"))
+    assert updated["status"] == "succeeded"
+    assert updated["returncode"] == 0
+    assert updated["process_pid"] == 9876
+    assert updated["artifacts"]["accounts.csv"] == str(output_dir / "accounts.csv")
+
+    events = (heartbeat_dir / "events" / "job-2.jsonl").read_text(encoding="utf-8")
+    assert "crawl_homefeed completed successfully." in events
+    heartbeat = (heartbeat_dir / "HEARTBEAT.md").read_text(encoding="utf-8")
+    assert "Pending user updates:" in heartbeat
+    assert "job-2" in heartbeat
+
+
+def test_ack_event_removes_pending_heartbeat_update(tmp_path):
+    heartbeat_dir = tmp_path / ".openclaw" / "red-crawler"
+    event_dir = heartbeat_dir / "events"
+    event_dir.mkdir(parents=True)
+    event = {
+        "event_id": "evt-1",
+        "job_id": "job-3",
+        "level": "info",
+        "message": "done",
+        "created_at": "2026-04-29T00:00:00+00:00",
+    }
+    (event_dir / "job-3.jsonl").write_text(
+        json.dumps(event, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_handler(
+        {
+            "action": "ack_event",
+            "workspace_path": str(tmp_path),
+            "event_id": "evt-1",
+        },
+        {"config": {}},
+    )
+
+    assert result["status"] == "success"
+    assert Path(result["artifacts"]["ack"]).exists()
+    heartbeat = Path(result["artifacts"]["heartbeat"]).read_text(encoding="utf-8")
+    assert "Pending user updates:\n- none" in heartbeat
 
 
 def test_bootstrap_does_not_run_setup_or_login_by_default(
