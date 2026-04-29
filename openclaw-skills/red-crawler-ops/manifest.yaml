@@ -1,5 +1,5 @@
 name: red-crawler-ops
-version: 1.0.0
+version: 1.1.0
 runtime: python
 entry: src/index.py
 description: Portable OpenClaw skill for running the installed red-crawler CLI. It can use a published CLI install by default, or an existing local checkout when explicitly requested.

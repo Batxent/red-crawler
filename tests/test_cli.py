@@ -13,7 +13,7 @@ def test_cli_version(capsys):
         main(["--version"])
 
     assert exc.value.code == 0
-    assert "red-crawler 0.1.2" in capsys.readouterr().out
+    assert "red-crawler 0.1.3" in capsys.readouterr().out
 
 
 def test_cli_install_browsers_runs_playwright_install(monkeypatch):

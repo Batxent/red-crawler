@@ -275,7 +275,7 @@ On Windows, red-crawler runs inside WSL2. You need:
 
 1. **red-crawler CLI:**
    ```bash
-   uv tool install red-crawler==0.1.2
+   uv tool install red-crawler==0.1.3
    ```
 2. **Playwright browser runtime:** run `bootstrap` with `install_browser: true`.
 

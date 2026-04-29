@@ -7,7 +7,7 @@ CLI crawler for collecting Xiaohongshu creator contact leads from profile bios a
 Install the published CLI:
 
 ```bash
-uv tool install red-crawler==0.1.2
+uv tool install red-crawler==0.1.3
 ```
 
 Install the Playwright browser runtime:

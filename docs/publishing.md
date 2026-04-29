@@ -14,15 +14,15 @@ uv build
 
 Expected artifacts:
 
-- `dist/red_crawler-0.1.2-py3-none-any.whl`
-- `dist/red_crawler-0.1.2.tar.gz`
+- `dist/red_crawler-0.1.3-py3-none-any.whl`
+- `dist/red_crawler-0.1.3.tar.gz`
 
 Smoke-test the wheel in a clean temporary environment before uploading:
 
 ```bash
 tmpdir="$(mktemp -d)"
 python3 -m venv "$tmpdir/venv"
-"$tmpdir/venv/bin/python" -m pip install dist/red_crawler-0.1.2-py3-none-any.whl
+"$tmpdir/venv/bin/python" -m pip install dist/red_crawler-0.1.3-py3-none-any.whl
 "$tmpdir/venv/bin/red-crawler" --version
 "$tmpdir/venv/bin/red-crawler" --help
 ```
@@ -44,7 +44,7 @@ uv publish --publish-url https://test.pypi.org/legacy/ dist/*
 Then install from TestPyPI in a clean environment:
 
 ```bash
-uv tool install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ red-crawler==0.1.2
+uv tool install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ red-crawler==0.1.3
 red-crawler --version
 ```
 
